@@ -22,3 +22,7 @@ class PaginatedUsers(BaseModel):
 
 class UserDelete(BaseModel):
     users: list[int]
+
+class UserDeleteResponse(BaseModel):
+    users_deleted : list[int]
+    users_dont_deleted : list[int]
