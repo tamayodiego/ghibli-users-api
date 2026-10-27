@@ -28,8 +28,11 @@ class UserService:
         return self.repo.get_all(skip, limit)
 
     def update(self, id: int, dto: UserUpdate | UserPatch) -> UserResponse | None:
-        # exclude_unset: en PATCH solo se actualizan los campos que vienen en el body
-        return self.repo.update(id, dto.model_dump(exclude_unset=True))
+        if isinstance(dto, UserUpdate):
+            data = dto.model_dump()                    # PUT: reemplaza todo
+        else:
+            data = dto.model_dump(exclude_unset=True)  # PATCH: solo lo enviado
+        return self.repo.update(id, data)
 
     def delete(self, id: int) -> bool:
         return self.repo.delete(id)
