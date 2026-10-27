@@ -1,6 +1,6 @@
 # app/routers/items.py
 from fastapi import APIRouter, status, Query
-from app.modules.users.models import (
+from app.modules.users.schemas import (
     PaginatedUsers,
     UserCreate,
     UserDelete,
@@ -11,6 +11,7 @@ from app.modules.users.models import (
 
 
 router = APIRouter(prefix="/users", tags=["users"])
+servicio_usuario = UserService()
 
 
 #Creación de usuario
