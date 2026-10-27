@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:17
+    container_name: ghibli-users-db
+    environment:
+      POSTGRES_USER: ghibli
+      POSTGRES_PASSWORD: ghibli
+      POSTGRES_DB: ghibli_users
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
