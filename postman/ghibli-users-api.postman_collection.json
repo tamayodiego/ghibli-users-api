@@ -1,12 +1,12 @@
 {
   "info": {
     "name": "ghibli-users-api",
-    "description": "Endpoints de la API de usuarios. Corre primero \"Crear usuario\": guarda su id en la variable userId que usan los demás requests.",
+    "description": "Endpoints de la API de usuarios. Corre primero \"Crear usuario\": guarda su id (un UUID) en la variable userId que usan los demás requests.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "baseUrl", "value": "http://127.0.0.1:8000" },
-    { "key": "userId", "value": "1" }
+    { "key": "userId", "value": "00000000-0000-0000-0000-000000000000" }
   ],
   "item": [
     {
@@ -106,7 +106,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"users\": [1, 2, 3]\n}",
+              "raw": "{\n  \"users\": [\"{{userId}}\"]\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/users/"

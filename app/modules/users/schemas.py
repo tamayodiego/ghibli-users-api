@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from pydantic import BaseModel
 
 class UserCreate(BaseModel):
@@ -5,7 +7,7 @@ class UserCreate(BaseModel):
     rol: str
 
 class UserResponse(UserCreate):
-    id: int
+    id: UUID
 
 class UserUpdate(UserCreate):
     pass
@@ -21,8 +23,8 @@ class PaginatedUsers(BaseModel):
     data: list[UserResponse]
 
 class UserDelete(BaseModel):
-    users: list[int]
+    users: list[UUID]
 
 class UserDeleteResponse(BaseModel):
-    users_deleted : list[int]
-    users_dont_deleted : list[int]
+    users_deleted : list[UUID]
+    users_dont_deleted : list[UUID]

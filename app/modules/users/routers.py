@@ -1,4 +1,6 @@
 # app/routers/items.py
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -33,22 +35,22 @@ def list_users(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=100),
 
 # Obtención de un usuario específico
 @router.get("/{user_id}")
-def get_user(user_id: int, servicio_usuario: UserService = Depends(get_user_service)) -> UserResponse:
+def get_user(user_id: UUID, servicio_usuario: UserService = Depends(get_user_service)) -> UserResponse:
     return servicio_usuario.seek_user_by_id(user_id)
 
 #Actualización de un usuario
 @router.put("/{user_id}")
-def full_user_update(user_id: int, user_dto: UserUpdate, servicio_usuario: UserService = Depends(get_user_service)) -> UserResponse:
+def full_user_update(user_id: UUID, user_dto: UserUpdate, servicio_usuario: UserService = Depends(get_user_service)) -> UserResponse:
     return servicio_usuario.update(user_id,user_dto)
 
 @router.patch("/{user_id}")
-def user_update(user_id: int, user_dto: UserPatch, servicio_usuario: UserService = Depends(get_user_service)):
+def user_update(user_id: UUID, user_dto: UserPatch, servicio_usuario: UserService = Depends(get_user_service)):
     return servicio_usuario.update(user_id,user_dto)
 
 
 #Borrado de usuario(s)
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user_by_id(user_id: int, servicio_usuario: UserService = Depends(get_user_service)):
+def delete_user_by_id(user_id: UUID, servicio_usuario: UserService = Depends(get_user_service)):
     servicio_usuario.delete(user_id)
 
 @router.delete("/")
