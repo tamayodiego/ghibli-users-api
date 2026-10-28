@@ -2,14 +2,34 @@ services:
   db:
     image: postgres:17
     container_name: ghibli-users-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ghibli
       POSTGRES_PASSWORD: ghibli
       POSTGRES_DB: ghibli_users
+    # Solo accesible desde esta máquina (para desarrollo local), no desde afuera
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ghibli -d ghibli_users"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: ghibli-users-api
+    restart: unless-stopped
+    environment:
+      # "db" es el nombre del servicio de PostgreSQL dentro de la red de Docker
+      DATABASE_URL: postgresql://ghibli:ghibli@db:5432/ghibli_users
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   pgdata:
