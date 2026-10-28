@@ -1,27 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.modules.auth.schemas import LoginRequest, TokenResponse
+from app.modules.auth.dependencies import get_auth_service, get_current_user
+from app.modules.auth.schemas import LoginRequest, RegisterRequest, TokenResponse
 from app.modules.auth.service import AuthService
 from app.modules.users.routers import get_user_service
-from app.modules.users.schemas import UserCreate, UserResponse
+from app.modules.users.schemas import UserResponse
 from app.modules.users.service import UserService
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# Lee el header "Authorization: Bearer <token>"
-bearer = HTTPBearer()
 
-def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
-    return AuthService(db)
-
-
-# Registro: usa el mismo servicio que POST /users/
+# Registro: usa el mismo servicio que POST /users/, pero sin permitir admin
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(user_dto: UserCreate, servicio_usuario: UserService = Depends(get_user_service)):
+def register(user_dto: RegisterRequest, servicio_usuario: UserService = Depends(get_user_service)):
     return servicio_usuario.create_user(user_dto)
 
 # Inicio de sesión: devuelve un JWT
@@ -34,8 +26,5 @@ def login(login_dto: LoginRequest, servicio_auth: AuthService = Depends(get_auth
 
 # Usuario dueño del token
 @router.get("/me", response_model=UserResponse)
-def me(credentials: HTTPAuthorizationCredentials = Depends(bearer), servicio_auth: AuthService = Depends(get_auth_service)):
-    user = servicio_auth.get_current_user(credentials.credentials)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido o expirado")
+def me(user: UserResponse = Depends(get_current_user)):
     return user
