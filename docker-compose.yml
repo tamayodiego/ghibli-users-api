@@ -3,17 +3,18 @@ services:
     image: postgres:17
     container_name: ghibli-users-db
     restart: unless-stopped
+    # Credenciales desde el .env (ver .env.example)
     environment:
-      POSTGRES_USER: ghibli
-      POSTGRES_PASSWORD: ghibli
-      POSTGRES_DB: ghibli_users
+      POSTGRES_USER: ${POSTGRES_USER:?falta en .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta en .env}
+      POSTGRES_DB: ${POSTGRES_DB:?falta en .env}
     # Solo accesible desde esta máquina (para desarrollo local), no desde afuera
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ghibli -d ghibli_users"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -24,7 +25,7 @@ services:
     restart: unless-stopped
     environment:
       # "db" es el nombre del servicio de PostgreSQL dentro de la red de Docker
-      DATABASE_URL: postgresql://ghibli:ghibli@db:5432/ghibli_users
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     ports:
       - "8000:8000"
     depends_on:
