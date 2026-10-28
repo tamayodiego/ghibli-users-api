@@ -1,6 +1,6 @@
 # ghibli-users-api
 
-API REST para la gestión de usuarios, pensada para controlar con roles el acceso a la API de Studio Ghibli. Está construida con **FastAPI**, **PostgreSQL** y **SQLAlchemy**, y la base de datos corre en **Docker**.
+API REST para la gestión de usuarios, pensada para controlar con roles el acceso a la API de Studio Ghibli. Está construida con **FastAPI**, **PostgreSQL**, **SQLAlchemy** y **Alembic**, y se despliega con **Docker Compose**.
 
 > **Estado actual:** el CRUD de usuarios está completo y guarda los datos en PostgreSQL. El control de acceso por roles, la integración con la API de Studio Ghibli y Redis están planeados, pero todavía no existen.
 
@@ -15,6 +15,7 @@ API REST para la gestión de usuarios, pensada para controlar con roles el acces
 - [Ver la base de datos](#ver-la-base-de-datos)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Variables de entorno](#variables-de-entorno)
+- [Migraciones](#migraciones)
 - [Comandos útiles](#comandos-útiles)
 - [Limitaciones conocidas](#limitaciones-conocidas)
 - [Licencia](#licencia)
@@ -23,13 +24,71 @@ API REST para la gestión de usuarios, pensada para controlar con roles el acces
 
 ## Cómo ejecutar la aplicación
 
-### Requisitos
+Hay dos formas de correrla:
+
+- **[Con Docker](#opción-a-todo-con-docker-producción):** la API y PostgreSQL corren en contenedores. Es la forma de desplegarla en un servidor.
+- **[En local para desarrollar](#opción-b-desarrollo-local):** solo PostgreSQL corre en Docker y la API corre en tu máquina con recarga automática.
+
+### Opción A: todo con Docker (producción)
+
+**Requisitos:** [Docker](https://www.docker.com/) con Docker Compose. En macOS sirve [OrbStack](https://orbstack.dev/) o Docker Desktop. No hace falta instalar Python.
+
+**1. Clonar el repositorio**
+
+```bash
+git clone https://github.com/tamayodiego/ghibli-users-api.git
+cd ghibli-users-api
+```
+
+**2. Crear el `.env` a partir de la plantilla**
+
+```bash
+cp .env.example .env
+```
+
+Abre `.env` y cambia `POSTGRES_PASSWORD` por una contraseña real. Docker Compose lee de ahí las credenciales de la base y no arranca si falta alguna.
+
+> ⚠️ PostgreSQL solo toma la contraseña la **primera vez** que crea el volumen de datos. Si después la cambias en el `.env`, la base sigue usando la anterior. Define la contraseña buena antes del primer `up`.
+
+**3. Levantar todo**
+
+```bash
+docker compose up -d --build
+```
+
+Esto hace lo siguiente:
+
+1. Construye la imagen de la API con el `Dockerfile`.
+2. Levanta PostgreSQL 17 (`ghibli-users-db`) y espera a que su healthcheck diga que está listo.
+3. Levanta la API (`ghibli-users-api`), que primero aplica las migraciones pendientes (`alembic upgrade head`) y después arranca uvicorn en el puerto `8000`.
+
+Los dos contenedores tienen `restart: unless-stopped`: si se caen o se reinicia el servidor, vuelven a levantarse solos. Los datos se guardan en el volumen `pgdata`.
+
+**4. Comprobar que funciona**
+
+```bash
+curl http://127.0.0.1:8000/health
+# {"status":"ok"}
+```
+
+**Para actualizar a una versión nueva:**
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+La API aplica sola las migraciones nuevas al arrancar.
+
+### Opción B: desarrollo local
+
+**Requisitos:**
 
 - [Python 3.12](https://www.python.org/)
 - [uv](https://docs.astral.sh/uv/), el gestor de dependencias y entornos de Python
-- [Docker](https://www.docker.com/) con Docker Compose. En macOS sirve [OrbStack](https://orbstack.dev/) o Docker Desktop.
+- [Docker](https://www.docker.com/) con Docker Compose, para PostgreSQL
 
-### 1. Clonar el repositorio e instalar dependencias
+**1. Clonar el repositorio e instalar dependencias**
 
 ```bash
 git clone https://github.com/tamayodiego/ghibli-users-api.git
@@ -39,54 +98,46 @@ uv sync
 
 `uv sync` crea el entorno virtual `.venv` e instala las versiones exactas de `uv.lock`.
 
-### 2. Crear el archivo `.env`
-
-En la raíz del proyecto, crea un archivo `.env` con la URL de conexión a la base de datos:
-
-```env
-DATABASE_URL=postgresql://ghibli:ghibli@localhost:5432/ghibli_users
-```
-
-Estos valores coinciden con los de `docker-compose.yml`. El `.env` está en el `.gitignore` y nunca se sube al repositorio.
-
-### 3. Levantar PostgreSQL
+**2. Crear el `.env`**
 
 ```bash
-docker compose up -d
+cp .env.example .env
 ```
 
-Esto levanta un contenedor `ghibli-users-db` con PostgreSQL 17 en el puerto `5432`. Los datos se guardan en el volumen `pgdata`, así que no se pierden al apagar el contenedor.
+Revisa que la contraseña de `DATABASE_URL` sea la misma que `POSTGRES_PASSWORD`. Si quieres ver en consola las consultas SQL, deja `SQL_ECHO=true`.
 
-Para comprobar que ya acepta conexiones:
+**3. Levantar solo PostgreSQL**
 
 ```bash
-docker exec ghibli-users-db pg_isready -U ghibli
+docker compose up -d db
 ```
 
-### 4. Ejecutar la API
+El puerto `5432` solo se publica en `127.0.0.1`, así que la base es accesible desde tu máquina, pero no desde afuera.
+
+**4. Aplicar las migraciones**
+
+```bash
+uv run alembic upgrade head
+```
+
+Crea la tabla `users` y cualquier cambio de esquema pendiente.
+
+**5. Ejecutar la API**
 
 ```bash
 uv run uvicorn app.main:app --reload
 ```
 
-- La API queda disponible en `http://127.0.0.1:8000`.
-- `--reload` reinicia el servidor cada vez que guardas un archivo.
-- Al arrancar, la app crea las tablas que no existan (por ejemplo `users`).
-- En consola verás las consultas SQL que se ejecutan, porque el engine tiene `echo=True`.
+`--reload` reinicia el servidor cada vez que guardas un archivo.
 
-### 5. Comprobar que funciona
+> Si ya tienes corriendo el contenedor `api` de la opción A, apágalo con `docker compose stop api`, porque los dos usan el puerto `8000`.
 
-```bash
-curl http://127.0.0.1:8000/health
-# {"status":"ok"}
-```
+### Documentación interactiva
 
-FastAPI también genera documentación interactiva, desde donde puedes probar cada endpoint:
+Con la API corriendo, de cualquiera de las dos formas, FastAPI genera documentación desde donde puedes probar cada endpoint:
 
 - **Swagger UI:** http://127.0.0.1:8000/docs
 - **ReDoc:** http://127.0.0.1:8000/redoc
-
-> **¿El puerto 8000 está ocupado?** Usa otro con `--port 8001` y cambia la URL en consecuencia.
 
 ---
 
@@ -339,15 +390,15 @@ La colección tiene dos variables, que puedes editar en la pestaña **Variables*
 
 ## Ver la base de datos
 
-Con estos datos de conexión puedes usar cualquier cliente de PostgreSQL:
+Con estos datos de conexión puedes usar cualquier cliente de PostgreSQL. Usuario, contraseña y base son los de tu `.env`:
 
-| Campo      | Valor          |
-|------------|----------------|
-| Host       | `localhost`    |
-| Puerto     | `5432`         |
-| Usuario    | `ghibli`       |
-| Contraseña | `ghibli`       |
-| Base       | `ghibli_users` |
+| Campo      | Valor                                   |
+|------------|-----------------------------------------|
+| Host       | `localhost`                             |
+| Puerto     | `5432`                                  |
+| Usuario    | `POSTGRES_USER` (por defecto `ghibli`)  |
+| Contraseña | `POSTGRES_PASSWORD`                     |
+| Base       | `POSTGRES_DB` (por defecto `ghibli_users`) |
 
 Algunas opciones:
 
@@ -365,7 +416,7 @@ Algunas opciones:
 ```
 ghibli-users-api/
 ├── app/
-│   ├── main.py                  # Crea la app FastAPI, registra routers y crea las tablas
+│   ├── main.py                  # Crea la app FastAPI y registra los routers
 │   ├── database.py              # Engine, SessionLocal, Base y get_db
 │   └── modules/
 │       └── users/
@@ -374,9 +425,15 @@ ghibli-users-api/
 │           ├── repository.py    # Acceso a datos con SQLAlchemy
 │           ├── models.py        # Modelo de base de datos (tabla users)
 │           └── schemas.py       # Schemas de Pydantic (entrada/salida de la API)
+├── migrations/
+│   ├── env.py                   # Configuración de Alembic (lee DATABASE_URL y Base.metadata)
+│   └── versions/                # Migraciones numeradas: 0001_create_users.py, ...
 ├── postman/                     # Colección de Postman
 ├── tests/
-├── docker-compose.yml           # PostgreSQL para desarrollo local
+├── alembic.ini                  # Configuración de Alembic
+├── Dockerfile                   # Imagen de la API
+├── docker-compose.yml           # API + PostgreSQL
+├── .env.example                 # Plantilla de variables de entorno
 ├── pyproject.toml               # Dependencias del proyecto
 └── uv.lock                      # Versiones exactas de las dependencias
 ```
@@ -420,11 +477,46 @@ En cada request, FastAPI llama a `get_db`, que abre una sesión. Con esa sesión
 
 ## Variables de entorno
 
-| Variable       | Obligatoria | Descripción                          | Ejemplo                                                  |
-|----------------|-------------|--------------------------------------|----------------------------------------------------------|
-| `DATABASE_URL` | Sí          | URL de conexión a PostgreSQL         | `postgresql://ghibli:ghibli@localhost:5432/ghibli_users` |
+Se definen en el archivo `.env`; `.env.example` es la plantilla.
 
-Se leen del archivo `.env` con `python-dotenv`. Si falta `DATABASE_URL`, la app no arranca.
+| Variable            | Obligatoria | Usada por                  | Descripción                                          | Ejemplo                                                  |
+|---------------------|-------------|----------------------------|------------------------------------------------------|----------------------------------------------------------|
+| `POSTGRES_USER`     | Sí          | Docker Compose             | Usuario de PostgreSQL                                | `ghibli`                                                 |
+| `POSTGRES_PASSWORD` | Sí          | Docker Compose             | Contraseña de PostgreSQL                             | `una-contraseña-segura`                                  |
+| `POSTGRES_DB`       | Sí          | Docker Compose             | Nombre de la base de datos                           | `ghibli_users`                                           |
+| `DATABASE_URL`      | Solo local  | La API fuera de Docker y Alembic | URL de conexión a PostgreSQL                   | `postgresql://ghibli:...@localhost:5432/ghibli_users`    |
+| `SQL_ECHO`          | No          | La API                     | Si es `true`, imprime en consola cada consulta SQL. Por defecto `false` | `true`                       |
+
+- **Dentro de Docker** no hace falta `DATABASE_URL`: Docker Compose la arma con `POSTGRES_*` y el host `db`, y fuerza `SQL_ECHO=false`.
+- **Fuera de Docker**, la app lee el `.env` con `python-dotenv`. Si falta `DATABASE_URL`, no arranca.
+
+---
+
+## Migraciones
+
+El esquema de la base se versiona con [Alembic](https://alembic.sqlalchemy.org/), el equivalente a `makemigrations` / `migrate` de Django. Las migraciones viven en `migrations/versions/` y van numeradas (`0001_create_users.py`, `0002_...`).
+
+| Django                        | Alembic                                         |
+|-------------------------------|-------------------------------------------------|
+| `manage.py makemigrations`    | `uv run alembic revision --autogenerate --rev-id 0002 -m "add email"` |
+| `manage.py migrate`           | `uv run alembic upgrade head`                   |
+| `manage.py migrate users zero`| `uv run alembic downgrade base`                 |
+
+**Para cambiar el esquema:**
+
+1. Modifica el modelo en `app/modules/users/models.py` (por ejemplo, agrega una columna).
+2. Genera la migración con el siguiente número:
+   ```bash
+   uv run alembic revision --autogenerate --rev-id 0002 -m "add email"
+   ```
+3. Revisa el archivo generado en `migrations/versions/`. El autogenerate no detecta todo, por ejemplo los renombres de columnas.
+4. Aplícala en tu base local:
+   ```bash
+   uv run alembic upgrade head
+   ```
+5. Haz commit de la migración junto con el cambio al modelo. En producción se aplica sola cuando el contenedor arranca.
+
+Para ver en qué migración está la base: `uv run alembic current`.
 
 ---
 
@@ -437,15 +529,23 @@ uv sync
 # Agregar una dependencia nueva
 uv add <paquete>
 
-# Levantar la API
+# Levantar la API en local
 uv run uvicorn app.main:app --reload
 
-# Levantar / apagar PostgreSQL
-docker compose up -d
+# Levantar todo con Docker (API + PostgreSQL) / apagarlo
+docker compose up -d --build
 docker compose down
 
-# Ver los logs de PostgreSQL
+# Levantar solo PostgreSQL (para desarrollo local)
+docker compose up -d db
+
+# Ver los logs
+docker compose logs -f api
 docker compose logs -f db
+
+# Aplicar migraciones / ver la migración actual
+uv run alembic upgrade head
+uv run alembic current
 
 # Borrar la base de datos por completo (¡elimina todos los datos!)
 docker compose down -v
@@ -461,8 +561,7 @@ Cosas que todavía no funcionan como deberían:
   - `GET /users/{user_id}` y `PUT /users/{user_id}` responden `500`.
   - `PATCH /users/{user_id}` responde `200` con `null`.
   - `DELETE /users/{user_id}` responde `204` aunque no se haya borrado nada.
-- **Roles:** `rol` acepta cualquier texto. Todavía no hay una lista de roles válidos ni control de acceso.
-- **Tablas:** se crean al arrancar con `Base.metadata.create_all`. Esto no modifica tablas que ya existen; para cambios de esquema harán falta migraciones (por ejemplo con Alembic).
+- **Autenticación y roles:** la API no tiene autenticación; cualquiera que llegue a la URL puede crear o borrar usuarios. Además, `rol` acepta cualquier texto. Está planeado para después de la primera release.
 - **Tests:** la carpeta `tests/` todavía no tiene pruebas.
 
 ---
