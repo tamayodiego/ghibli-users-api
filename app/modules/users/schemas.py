@@ -2,10 +2,12 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.modules.users.models import Rol
+
 # Campos comunes de un usuario
 class UserBase(BaseModel):
     name: str
-    rol: str
+    rol: Rol
 
 # Al crear se manda la contraseña en texto plano; se guarda solo su hash
 class UserCreate(UserBase):
@@ -22,7 +24,7 @@ class UserUpdate(UserBase):
 
 class UserPatch(BaseModel):
     name: str | None = None
-    rol: str | None = None
+    rol: Rol | None = None
 
 class PaginatedUsers(BaseModel):
     total: int
