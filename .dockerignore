@@ -1,0 +1,9 @@
+.git
+.venv
+.env
+**/__pycache__
+.vscode
+.idea
+.DS_Store
+postman
+tests
