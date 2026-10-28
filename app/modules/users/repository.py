@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -20,11 +22,16 @@ class UserRepository:
             id=user.id,
             name=user.name,
             rol=user.rol,
+            username=user.username,
         )
 
-    def get_by_id(self, user_id: int) -> UserResponse | None:
+    def get_by_id(self, user_id: UUID) -> UserResponse | None:
         user = self.db.get(User, user_id)
         return self._to_schema(user) if user else None
+
+    # Regresa el modelo completo (con password_hash) para validar el login
+    def get_by_username(self, username: str) -> User | None:
+        return self.db.scalar(select(User).where(User.username == username))
 
     def get_all(self, skip: int = 0, limit: int = 100) -> PaginatedUsers:
         total = self.db.scalar(select(func.count()).select_from(User))
@@ -33,14 +40,19 @@ class UserRepository:
             total=total, skip=skip, limit=limit, data=[self._to_schema(u) for u in users]
         )
 
-    def add(self, user: UserCreate) -> UserResponse:
-        db_user = User(**user.model_dump())
+    def add(self, user: UserCreate, password_hash: str) -> UserResponse:
+        db_user = User(
+            name=user.name,
+            rol=user.rol,
+            username=user.username,
+            password_hash=password_hash,
+        )
         self.db.add(db_user)
         self.db.commit()
         self.db.refresh(db_user)
         return self._to_schema(db_user)
 
-    def update(self, user_id: int, data: dict) -> UserResponse | None:
+    def update(self, user_id: UUID, data: dict) -> UserResponse | None:
         user = self.db.get(User, user_id)
         if user is None:
             return None
@@ -50,7 +62,7 @@ class UserRepository:
         self.db.refresh(user)
         return self._to_schema(user)
 
-    def delete(self, user_id: int) -> bool:
+    def delete(self, user_id: UUID) -> bool:
         user = self.db.get(User, user_id)
         if user is None:
             return False
@@ -58,7 +70,7 @@ class UserRepository:
         self.db.commit()
         return True
 
-    def delete_set(self, users: list[int]) -> UserDeleteResponse:
+    def delete_set(self, users: list[UUID]) -> UserDeleteResponse:
         found = set(self.db.scalars(select(User.id).where(User.id.in_(users))).all())
         self.db.execute(delete(User).where(User.id.in_(found)))
         self.db.commit()
