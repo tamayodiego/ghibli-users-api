@@ -14,6 +14,8 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev
 
 COPY app ./app
+COPY migrations ./migrations
+COPY alembic.ini ./
 
 # No correr como root
 RUN useradd --create-home appuser
@@ -23,4 +25,5 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Aplica las migraciones pendientes y luego arranca la API
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
