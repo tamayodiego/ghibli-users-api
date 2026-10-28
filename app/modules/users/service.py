@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.modules.auth.security import hash_password
 from app.modules.users.repository import UserRepository
 from app.modules.users.schemas import (
     PaginatedUsers,
@@ -21,7 +22,7 @@ class UserService:
         self.repo = UserRepository(db)
 
     def create_user(self, dto: UserCreate) -> UserResponse:
-        return self.repo.add(dto)
+        return self.repo.add(dto, hash_password(dto.password))
 
     def seek_user_by_id(self, id: UUID) -> UserResponse | None:
         return self.repo.get_by_id(id)
