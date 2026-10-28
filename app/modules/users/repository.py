@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -22,7 +24,7 @@ class UserRepository:
             rol=user.rol,
         )
 
-    def get_by_id(self, user_id: int) -> UserResponse | None:
+    def get_by_id(self, user_id: UUID) -> UserResponse | None:
         user = self.db.get(User, user_id)
         return self._to_schema(user) if user else None
 
@@ -40,7 +42,7 @@ class UserRepository:
         self.db.refresh(db_user)
         return self._to_schema(db_user)
 
-    def update(self, user_id: int, data: dict) -> UserResponse | None:
+    def update(self, user_id: UUID, data: dict) -> UserResponse | None:
         user = self.db.get(User, user_id)
         if user is None:
             return None
@@ -50,7 +52,7 @@ class UserRepository:
         self.db.refresh(user)
         return self._to_schema(user)
 
-    def delete(self, user_id: int) -> bool:
+    def delete(self, user_id: UUID) -> bool:
         user = self.db.get(User, user_id)
         if user is None:
             return False
@@ -58,7 +60,7 @@ class UserRepository:
         self.db.commit()
         return True
 
-    def delete_set(self, users: list[int]) -> UserDeleteResponse:
+    def delete_set(self, users: list[UUID]) -> UserDeleteResponse:
         found = set(self.db.scalars(select(User.id).where(User.id.in_(users))).all())
         self.db.execute(delete(User).where(User.id.in_(found)))
         self.db.commit()
