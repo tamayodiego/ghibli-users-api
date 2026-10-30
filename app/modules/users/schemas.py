@@ -1,8 +1,16 @@
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.modules.users.models import Rol
+
+Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=100)]
+Username = Annotated[str, StringConstraints(min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")]
+Password = Annotated[str, StringConstraints(min_length=8, max_length=128)]
+
+FORBID_EXTRA = ConfigDict(extra="forbid")
+
 
 # Campos comunes de un usuario
 class UserBase(BaseModel):
@@ -11,8 +19,10 @@ class UserBase(BaseModel):
 
 # Al crear se manda la contraseña en texto plano; se guarda solo su hash
 class UserCreate(UserBase):
-    username: str
-    password: str
+    model_config = FORBID_EXTRA
+    name: Name
+    username: Username
+    password: Password
 
 # Nunca se regresa la contraseña ni su hash
 class UserResponse(UserBase):
@@ -20,10 +30,12 @@ class UserResponse(UserBase):
     username: str
 
 class UserUpdate(UserBase):
-    pass
+    model_config = FORBID_EXTRA
+    name: Name
 
 class UserPatch(BaseModel):
-    name: str | None = None
+    model_config = FORBID_EXTRA
+    name: Name | None = None
     rol: Rol | None = None
 
 class PaginatedUsers(BaseModel):
@@ -33,7 +45,8 @@ class PaginatedUsers(BaseModel):
     data: list[UserResponse]
 
 class UserDelete(BaseModel):
-    users: list[UUID]
+    model_config = FORBID_EXTRA
+    users: list[UUID] = Field(min_length=1, max_length=100)
 
 class UserDeleteResponse(BaseModel):
     users_deleted : list[UUID]

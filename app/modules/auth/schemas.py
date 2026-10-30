@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.modules.users.models import Rol
 from app.modules.users.schemas import UserCreate
@@ -17,8 +17,9 @@ class RegisterRequest(UserCreate):
 
 # Body de POST /auth/login
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(max_length=50)
+    password: str = Field(max_length=128)
 
 
 # Respuesta del login
