@@ -985,6 +985,9 @@ Para ver en qué migración está la base: `uv run alembic current`.
 # Instalar o actualizar dependencias
 uv sync
 
+# Correr las pruebas (no necesitan la base de datos)
+uv run python -m unittest
+
 # Agregar una dependencia nueva
 uv add <paquete>
 
@@ -1027,7 +1030,7 @@ Cosas que todavía no funcionan como deberían:
 - **Tokens:** no hay logout ni refresh token; un token sigue sirviendo hasta que expira. Como el usuario se vuelve a leer de la base en cada request, un cambio de rol aplica al momento, y si se borra al usuario su token deja de funcionar.
 - **Cambiar contraseña o username:** no hay endpoint para hacerlo.
 - **Orden de `GET /users/`:** se ordena por `id`, y como es un UUID el orden no significa nada (no es el orden de creación).
-- **Tests:** la carpeta `tests/` todavía no tiene pruebas.
+- **Tests:** solo hay pruebas unitarias de lo fundamental (seguridad, permisos, validaciones y el servicio de Ghibli). No hay pruebas de los endpoints contra la base de datos.
 - **Caché por proceso:** la caché de Ghibli vive en la memoria de cada proceso. Con varias instancias de la API, cada una tiene la suya. Para compartirla haría falta algo como Redis.
 
 ---
