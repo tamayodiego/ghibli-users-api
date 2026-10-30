@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "ghibli-users-api",
-    "description": "Endpoints de la API de usuarios. Todos los de Users piden token: listar y ver acepta cualquier rol, crear, editar y borrar solo admin. Crea un admin con \"uv run python -m app.create_admin --name ... --username ... --password ...\", pon su usuario y contraseña en las variables username y password, y corre \"Login\": guarda el token que usan los demás requests. \"Crear usuario\" guarda su id (un UUID) en la variable userId. \"Registrar\" crea un usuario nuevo en cada corrida (no puede ser admin).",
+    "description": "Endpoints de la API de usuarios. Todos los de Users piden token: listar y ver acepta cualquier rol, crear, editar y borrar solo admin. Crea un admin con \"uv run python -m app.create_admin --name ... --username ... --password ...\", pon su usuario y contraseña en las variables username y password, y corre \"Login\": guarda el token que usan los demás requests. \"Crear usuario\" guarda su id (un UUID) en la variable userId. \"Registrar\" crea un usuario nuevo sin rol en cada corrida; un admin se lo asigna con PATCH.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -24,6 +24,14 @@
     {
       "key": "password",
       "value": "cambia-esta-contraseña"
+    },
+    {
+      "key": "requestId",
+      "value": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "key": "folio",
+      "value": "000000"
     }
   ],
   "item": [
@@ -65,7 +73,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"name\": \"Chihiro\",\n  \"rol\": \"people\",\n  \"username\": \"chihiro_{{$timestamp}}\",\n  \"password\": \"secreta123\"\n}"
+              "raw": "{\n  \"name\": \"Chihiro\",\n  \"username\": \"chihiro_{{$timestamp}}\",\n  \"password\": \"secreta123\"\n}"
             },
             "url": "{{baseUrl}}/auth/register"
           }
@@ -277,6 +285,142 @@
           }
         ]
       }
+    },
+    {
+      "name": "Role requests",
+      "description": "Solicitudes de rol. Crear y ver las propias: cualquier usuario con token (incluso sin rol). Listar, ver, aprobar y negar: solo admin. \"Crear solicitud\" guarda su id en la variable requestId y su folio en folio.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Crear solicitud",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/role-requests/",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"requested_rol\": \"films\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"requestId\", body.id);",
+                  "pm.collectionVariables.set(\"folio\", body.folio);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mis solicitudes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/role-requests/me"
+          }
+        },
+        {
+          "name": "Mi última solicitud",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/role-requests/me/last"
+          }
+        },
+        {
+          "name": "Listar solicitudes (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/role-requests/?status=pending&skip=0&limit=10"
+          }
+        },
+        {
+          "name": "Obtener por id (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/role-requests/{{requestId}}"
+          }
+        },
+        {
+          "name": "Obtener por folio (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/role-requests/folio/{{folio}}"
+          }
+        },
+        {
+          "name": "Aprobar (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/role-requests/{{requestId}}/approve",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"comment\": \"Aprobado\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Negar (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/role-requests/{{requestId}}/reject",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"comment\": \"Motivo\"\n}"
+            }
+          }
+        }
+      ]
     }
   ]
 }

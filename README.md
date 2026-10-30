@@ -56,27 +56,30 @@ Docker Compose lee de ahí estos valores y no arranca si falta alguno.
 
 > ⚠️ PostgreSQL solo toma la contraseña la **primera vez** que crea el volumen de datos. Si después la cambias en el `.env`, la base sigue usando la anterior. Define la contraseña buena antes del primer `up`.
 
-**3. Levantar todo**
+**3. Levantar la base de datos y crear el primer admin**
+
+El admin se crea **antes** de exponer la API, para que nadie pueda registrarse con ese username mientras tanto.
 
 ```bash
-docker compose up -d --build
+docker compose build
+docker compose up -d db
+docker compose run --rm api sh -c "alembic upgrade head && python -m app.create_admin --name 'Totoro' --username totoro --password una-contraseña-segura"
+```
+
+`docker compose run` crea un contenedor temporal que aplica las migraciones, crea el admin y se borra al terminar. No publica el puerto `8000`, así que la API todavía no es accesible. Solo se hace una vez. Ver [por qué hace falta](#el-primer-admin).
+
+**4. Levantar la API**
+
+```bash
+docker compose up -d api
 ```
 
 Esto hace lo siguiente:
 
-1. Construye la imagen de la API con el `Dockerfile`.
-2. Levanta PostgreSQL 17 (`ghibli-users-db`) y espera a que su healthcheck diga que está listo.
-3. Levanta la API (`ghibli-users-api`), que primero aplica las migraciones pendientes (`alembic upgrade head`) y después arranca uvicorn en el puerto `8000`.
+1. Espera a que el healthcheck de PostgreSQL 17 (`ghibli-users-db`) diga que está listo.
+2. Levanta la API (`ghibli-users-api`), que aplica las migraciones pendientes (`alembic upgrade head`) y después arranca uvicorn en el puerto `8000`.
 
 Los dos contenedores tienen `restart: unless-stopped`: si se caen o se reinicia el servidor, vuelven a levantarse solos. Los datos se guardan en el volumen `pgdata`.
-
-**4. Crear el primer admin**
-
-```bash
-docker compose exec api python -m app.create_admin --name "Totoro" --username totoro --password una-contraseña-segura
-```
-
-Solo se hace una vez. Ver [por qué hace falta](#el-primer-admin).
 
 **5. Comprobar que funciona**
 
@@ -169,7 +172,7 @@ En Swagger, el botón **Authorize** recibe el token. Pega solo el `access_token`
 
 ### Cómo funciona
 
-1. Te registras con `POST /auth/register` o un admin te crea con `POST /users/`. La contraseña se guarda con hash (argon2), nunca en texto plano.
+1. Te registras con `POST /auth/register` (sin rol) o un admin te crea con `POST /users/`. La contraseña se guarda con hash (argon2), nunca en texto plano.
 2. Inicias sesión con `POST /auth/login`, que te devuelve un **JWT** (`access_token`).
 3. En los demás requests mandas el token en el header:
    ```
@@ -186,27 +189,48 @@ El `rol` de un usuario solo puede ser uno de estos:
 
 Cualquier otro valor responde `422`. La base de datos también lo valida, porque la columna es un enum de PostgreSQL.
 
+Un usuario también puede **no tener rol** (`rol: null`). Es lo que pasa al registrarse: el usuario puede iniciar sesión, pero no tiene acceso a nada hasta que un admin le asigna un rol, ya sea aprobando una [solicitud de rol](#solicitudes-de-rol) o con `PATCH /users/{id}`. El usuario puede solicitar cualquier rol menos `admin`, pero nunca se lo asigna él mismo: solo un admin puede asignarlo, porque el rol decide a qué datos puede entrar. Para quitarle el acceso a alguien, un admin le pone `rol: null`.
+
 ### Permisos
 
-| Acción                                      | Sin token | Cualquier rol | `admin` |
-|---------------------------------------------|-----------|---------------|---------|
-| `/health`, `/auth/register`, `/auth/login`  | ✅        | ✅            | ✅      |
-| `/auth/me`                                  | `401`     | ✅            | ✅      |
-| Listar y ver usuarios                       | `401`     | ✅            | ✅      |
-| Crear, editar y borrar usuarios             | `401`     | `403`         | ✅      |
+| Acción                                      | Sin token | Sin rol | Cualquier otro rol | `admin` |
+|---------------------------------------------|-----------|---------|--------------------|---------|
+| `/health`, `/auth/register`, `/auth/login`  | ✅        | ✅      | ✅                 | ✅      |
+| `/auth/me`                                  | `401`     | ✅      | ✅                 | ✅      |
+| Listar y ver usuarios                       | `401`     | `403`   | ✅                 | ✅      |
+| Crear, editar y borrar usuarios             | `401`     | `403`   | `403`              | ✅      |
+| Crear y ver sus propias solicitudes de rol  | `401`     | ✅      | ✅                 | ✅      |
+| Ver, aprobar y negar todas las solicitudes  | `401`     | `403`   | `403`              | ✅      |
 
 - **`401 Unauthorized`:** no mandaste token, o es inválido o ya expiró.
-- **`403 Forbidden`:** el token es válido, pero tu rol no tiene permiso.
+- **`403 Forbidden`:** el token es válido, pero tu usuario todavía no tiene rol (`"Tu usuario todavía no tiene rol asignado"`) o tu rol no tiene permiso.
+
+`/auth/me` sí acepta usuarios sin rol, para que puedan ver si ya les asignaron uno.
+
+### Solicitudes de rol
+
+Un usuario pide un rol con `POST /role-requests/`, y un admin la aprueba o la niega. Sirve tanto para usuarios sin rol como para cambiar de rol.
+
+1. El usuario crea la solicitud con el rol que quiere (nunca `admin`). Queda en estado `pending` y recibe un **folio**.
+2. El admin la revisa por id o por folio, y la aprueba (`approve`) o la niega (`reject`), con un comentario opcional.
+3. Al aprobarla, el usuario recibe el rol **en la misma transacción**: o pasan las dos cosas, o ninguna.
+
+Reglas:
+
+- Un usuario solo puede tener **una solicitud `pending`** a la vez (`409`). Lo garantiza un índice único parcial en la base de datos.
+- No se puede pedir el rol que ya tienes (`409`).
+- Una solicitud ya aprobada o negada no se puede volver a revisar (`409`).
+- El **folio** son 6 dígitos aleatorios (por ejemplo `048213`), único, pensado para que una persona lo pueda dictar o buscar. El `id` (UUID) sigue siendo el identificador técnico.
 
 ### El primer admin
 
-En `/auth/register` no se puede elegir el rol `admin`, y crear admins por `POST /users/` necesita el token de otro admin. Por eso el primero se crea desde la terminal, sin pasar por la API:
+En `/auth/register` no se puede elegir rol, y crear admins por `POST /users/` necesita el token de otro admin. Por eso el primero se crea desde la terminal, sin pasar por la API:
 
 ```bash
 uv run python -m app.create_admin --name "Totoro" --username totoro --password secreta123
 ```
 
-En Docker: `docker compose exec api python -m app.create_admin ...` con los mismos parámetros.
+En Docker se corre en un contenedor temporal, antes de levantar la API (ver [Opción A, paso 3](#opción-a-todo-con-docker-producción)), para que nadie se registre con ese username mientras tanto.
 
 > La contraseña queda en el historial de la terminal. Cámbiala después o borra esa línea del historial.
 
@@ -219,7 +243,7 @@ En Docker: `docker compose exec api python -m app.create_admin ...` con los mism
 | Método   | Ruta               | Acceso         | Descripción                           | Respuesta exitosa          |
 |----------|--------------------|----------------|---------------------------------------|----------------------------|
 | `GET`    | `/health`          | Público        | Comprueba que la API está viva        | `200` `{"status": "ok"}`   |
-| `POST`   | `/auth/register`   | Público        | Registra un usuario (no admin)        | `201` `UserResponse`       |
+| `POST`   | `/auth/register`   | Público        | Registra un usuario sin rol           | `201` `UserResponse`       |
 | `POST`   | `/auth/login`      | Público        | Inicia sesión y devuelve un JWT       | `200` `TokenResponse`      |
 | `GET`    | `/auth/me`         | Con token      | Devuelve el usuario dueño del token   | `200` `UserResponse`       |
 | `POST`   | `/users/`          | Admin          | Crea un usuario con cualquier rol     | `201` `UserResponse`       |
@@ -229,10 +253,19 @@ En Docker: `docker compose exec api python -m app.create_admin ...` con los mism
 | `PATCH`  | `/users/{user_id}` | Admin          | Actualiza solo los campos enviados    | `200` `UserResponse`       |
 | `DELETE` | `/users/{user_id}` | Admin          | Borra un usuario                      | `204` sin cuerpo           |
 | `DELETE` | `/users/`          | Admin          | Borra varios usuarios                 | `200` `UserDeleteResponse` |
+| `POST`   | `/role-requests/`  | Con token      | Solicita un rol                       | `201` `RoleRequestResponse` |
+| `GET`    | `/role-requests/me` | Con token     | Mis solicitudes, de la más nueva a la más vieja | `200` `list[RoleRequestResponse]` |
+| `GET`    | `/role-requests/me/last` | Con token | Mi última solicitud                  | `200` `RoleRequestResponse` |
+| `GET`    | `/role-requests/`  | Admin          | Lista solicitudes (filtro `?status=`) | `200` `PaginatedRoleRequests` |
+| `GET`    | `/role-requests/{request_id}` | Admin | Obtiene una solicitud por id         | `200` `RoleRequestResponse` |
+| `GET`    | `/role-requests/folio/{folio}` | Admin | Obtiene una solicitud por folio     | `200` `RoleRequestResponse` |
+| `POST`   | `/role-requests/{request_id}/approve` | Admin | Aprueba y asigna el rol      | `200` `RoleRequestResponse` |
+| `POST`   | `/role-requests/{request_id}/reject` | Admin | Niega la solicitud            | `200` `RoleRequestResponse` |
 
 - Los ids de usuario son **UUID**, por ejemplo `3ab6336d-b7ab-4f3e-bd21-c9ce7b481edb`.
 - Si el body o los parámetros no cumplen con el schema (falta un campo obligatorio, un tipo incorrecto, un rol que no existe, `limit` fuera de rango, etc.), cualquier endpoint responde **`422 Unprocessable Entity`** con el detalle del error.
 - Los endpoints con token responden `401` o `403` según la [tabla de permisos](#permisos).
+- Los endpoints con `{user_id}` responden `404` si el usuario no existe, y crear un usuario con un `username` que ya existe responde `409`.
 
 ---
 
@@ -249,21 +282,19 @@ Comprueba que la API está levantada. No consulta la base de datos.
 
 ### `POST /auth/register`
 
-Registra un usuario nuevo. Es público, pero no permite el rol `admin`.
+Registra un usuario nuevo **sin rol** (`rol: null`). Es público, pero el usuario no tiene acceso a nada hasta que un admin le asigna un rol.
 
 **Body (`RegisterRequest`):**
 
 | Campo      | Tipo     | Obligatorio | Descripción                                |
 |------------|----------|-------------|--------------------------------------------|
 | `name`     | `string` | Sí          | Nombre del usuario                         |
-| `rol`      | `Rol`    | Sí          | Cualquier [rol](#roles) menos `admin`      |
 | `username` | `string` | Sí          | Nombre para iniciar sesión; debe ser único |
 | `password` | `string` | Sí          | Contraseña; se guarda solo su hash         |
 
 ```json
 {
   "name": "Chihiro",
-  "rol": "people",
   "username": "chihiro",
   "password": "secreta123"
 }
@@ -273,7 +304,7 @@ Registra un usuario nuevo. Es público, pero no permite el rol `admin`.
 ```json
 {
   "name": "Chihiro",
-  "rol": "people",
+  "rol": null,
   "id": "3925d6e7-05f8-46e0-888b-a8e17734a7a9",
   "username": "chihiro"
 }
@@ -282,8 +313,8 @@ Registra un usuario nuevo. Es público, pero no permite el rol `admin`.
 La respuesta nunca incluye la contraseña ni su hash.
 
 **Errores:**
-- `422` si `rol` es `admin`: `"No puedes registrarte como admin"`.
-- Si el `username` ya existe, hoy responde `500`. Ver [Limitaciones conocidas](#limitaciones-conocidas).
+- `422` si se manda `rol` (o cualquier campo que no esté en el body).
+- `409` si el `username` ya existe: `"El username ya existe"`.
 
 ---
 
@@ -334,9 +365,9 @@ Devuelve el usuario dueño del token.
 
 ### `POST /users/`
 
-Crea un usuario nuevo con **cualquier** rol, incluido `admin`. Solo para admins. El `id` lo genera la base de datos.
+Crea un usuario nuevo con **cualquier** rol, incluido `admin`, o sin rol si no se manda. Solo para admins. El `id` lo genera la base de datos.
 
-**Body (`UserCreate`):** los mismos campos que [`/auth/register`](#post-authregister), pero `rol` puede ser `admin`.
+**Body (`UserCreate`):** los mismos campos que [`/auth/register`](#post-authregister), más `rol` (opcional, puede ser `admin`).
 
 ```json
 {
@@ -356,6 +387,8 @@ Crea un usuario nuevo con **cualquier** rol, incluido `admin`. Solo para admins.
   "username": "totoro"
 }
 ```
+
+**Errores:** `409` si el `username` ya existe: `"El username ya existe"`.
 
 ---
 
@@ -404,13 +437,13 @@ Obtiene un usuario por su id.
 { "name": "Totoro", "rol": "admin", "id": "3ab6336d-b7ab-4f3e-bd21-c9ce7b481edb", "username": "totoro" }
 ```
 
-> ⚠️ Si el usuario no existe, hoy responde `500`. Ver [Limitaciones conocidas](#limitaciones-conocidas).
+**Errores:** `404` si el usuario no existe: `"Usuario no encontrado"`.
 
 ---
 
 ### `PUT /users/{user_id}`
 
-Reemplaza el nombre y el rol del usuario. Hay que mandar los dos campos. El `username` y la contraseña no se cambian aquí.
+Reemplaza el nombre y el rol del usuario. Hay que mandar los dos campos; `"rol": null` le quita el rol. El `username` y la contraseña no se cambian aquí.
 
 **Path params:** `user_id` (`UUID`)
 
@@ -418,8 +451,8 @@ Reemplaza el nombre y el rol del usuario. Hay que mandar los dos campos. El `use
 
 | Campo  | Tipo     | Obligatorio |
 |--------|----------|-------------|
-| `name` | `string` | Sí          |
-| `rol`  | `Rol`    | Sí          |
+| `name` | `string`       | Sí          |
+| `rol`  | `Rol` o `null` | Sí          |
 
 ```json
 {
@@ -433,7 +466,7 @@ Reemplaza el nombre y el rol del usuario. Hay que mandar los dos campos. El `use
 { "name": "Chihiro", "rol": "locations", "id": "3925d6e7-05f8-46e0-888b-a8e17734a7a9", "username": "chihiro" }
 ```
 
-> ⚠️ Si el usuario no existe, hoy responde `500`. Ver [Limitaciones conocidas](#limitaciones-conocidas).
+**Errores:** `404` si el usuario no existe: `"Usuario no encontrado"`.
 
 ---
 
@@ -459,7 +492,7 @@ Actualiza **solo los campos que mandes** en el body. Los demás quedan como esta
 { "name": "Chihiro", "rol": "species", "id": "3925d6e7-05f8-46e0-888b-a8e17734a7a9", "username": "chihiro" }
 ```
 
-> ⚠️ Si el usuario no existe, hoy responde `200` con `null`. Ver [Limitaciones conocidas](#limitaciones-conocidas).
+**Errores:** `404` si el usuario no existe: `"Usuario no encontrado"`.
 
 ---
 
@@ -471,7 +504,7 @@ Borra un usuario por su id.
 
 **Respuesta `204 No Content`:** sin cuerpo.
 
-> ⚠️ Responde `204` aunque el usuario no exista. Ver [Limitaciones conocidas](#limitaciones-conocidas).
+**Errores:** `404` si el usuario no existe: `"Usuario no encontrado"`.
 
 ---
 
@@ -509,6 +542,84 @@ Borra varios usuarios a la vez y dice cuáles se borraron y cuáles no existían
 
 ---
 
+### `POST /role-requests/`
+
+Crea una solicitud de rol para el usuario del token. Acepta usuarios sin rol.
+
+**Body (`RoleRequestCreate`):**
+```json
+{ "requested_rol": "films" }
+```
+
+**Respuesta `201` (`RoleRequestResponse`):**
+```json
+{
+  "id": "8d2f6c1a-4b3e-4f2a-9c1d-2e3f4a5b6c7d",
+  "folio": "048213",
+  "user_id": "3925d6e7-05f8-46e0-888b-a8e17734a7a9",
+  "requested_rol": "films",
+  "status": "pending",
+  "review_comment": null,
+  "reviewed_by": null,
+  "created_at": "2026-10-30T18:00:00Z",
+  "reviewed_at": null
+}
+```
+
+**Errores:**
+- `409` si ya tienes una solicitud pendiente: `"Ya tienes una solicitud pendiente"`.
+- `409` si pides el rol que ya tienes: `"Ya tienes ese rol"`.
+- `422` si pides `admin`: `"No se puede solicitar el rol admin"`.
+
+---
+
+### `GET /role-requests/me` y `GET /role-requests/me/last`
+
+- `/me` devuelve todas tus solicitudes, de la más nueva a la más vieja (`200`, lista vacía si no tienes).
+- `/me/last` devuelve solo la más reciente. `404` si no tienes ninguna: `"No tienes solicitudes"`.
+
+---
+
+### `GET /role-requests/`
+
+Solo admin. Lista las solicitudes con paginación, de la más nueva a la más vieja.
+
+| Parámetro | Tipo     | Default | Descripción                                    |
+|-----------|----------|---------|------------------------------------------------|
+| `status`  | `string` | todos   | `pending`, `approved` o `rejected`             |
+| `skip`    | `int`    | `0`     | Cuántas saltar                                 |
+| `limit`   | `int`    | `10`    | Cuántas devolver (máximo 100)                  |
+
+**Respuesta `200` (`PaginatedRoleRequests`):** `{"total", "skip", "limit", "data": [RoleRequestResponse]}`.
+
+---
+
+### `GET /role-requests/{request_id}` y `GET /role-requests/folio/{folio}`
+
+Solo admin. Obtienen una solicitud por su UUID o por su folio de 6 dígitos.
+
+- `404` si no existe: `"Solicitud no encontrada"`.
+- `422` si el id no es un UUID o el folio no son exactamente 6 dígitos.
+
+---
+
+### `POST /role-requests/{request_id}/approve` y `/reject`
+
+Solo admin. Aprueban o niegan una solicitud pendiente. Al aprobar, el usuario recibe el rol solicitado en la misma transacción.
+
+**Body (`RoleRequestReview`, opcional):**
+```json
+{ "comment": "Aprobado por el equipo de películas" }
+```
+
+**Respuesta `200` (`RoleRequestResponse`):** la solicitud con `status` en `approved` o `rejected`, y con `reviewed_by`, `reviewed_at` y `review_comment` llenos.
+
+**Errores:**
+- `404` si la solicitud no existe.
+- `409` si ya fue aprobada o negada: `"La solicitud ya fue revisada"`.
+
+---
+
 ## Modelos de datos
 
 ### Tabla `users` (modelo SQLAlchemy `User`)
@@ -517,9 +628,25 @@ Borra varios usuarios a la vez y dice cuáles se borraron y cuáles no existían
 |-----------------|---------------------|-----------------------------------------------------|
 | `id`            | `uuid`              | Llave primaria; lo genera PostgreSQL con `gen_random_uuid()` |
 | `name`          | `character varying` | `NOT NULL`                                          |
-| `rol`           | `user_rol` (enum)   | `NOT NULL`; uno de los [roles](#roles)              |
+| `rol`           | `user_rol` (enum)   | Uno de los [roles](#roles), o `NULL` si no tiene rol |
 | `username`      | `character varying` | `NOT NULL`, único                                   |
 | `password_hash` | `character varying` | `NOT NULL`; hash argon2 de la contraseña            |
+
+### Tabla `role_requests` (modelo SQLAlchemy `RoleRequest`)
+
+| Columna          | Tipo                          | Restricciones                                                  |
+|------------------|-------------------------------|----------------------------------------------------------------|
+| `id`             | `uuid`                        | Llave primaria; `gen_random_uuid()`                            |
+| `folio`          | `char(6)`                     | `NOT NULL`, único; solo dígitos                                |
+| `user_id`        | `uuid`                        | `NOT NULL`; FK → `users.id`, `ON DELETE CASCADE`               |
+| `requested_rol`  | `user_rol` (enum)             | `NOT NULL`; nunca `admin`                                      |
+| `status`         | `role_request_status` (enum)  | `NOT NULL`, default `pending`; `pending`, `approved`, `rejected` |
+| `reviewed_by`    | `uuid`                        | FK → `users.id`, `ON DELETE SET NULL`; el admin que la revisó  |
+| `review_comment` | `text`                        | Opcional                                                       |
+| `created_at`     | `timestamptz`                 | `NOT NULL`, default `now()`                                    |
+| `reviewed_at`    | `timestamptz`                 | Se llena al aprobar o negar                                    |
+
+Índice único parcial `uq_role_requests_one_pending_per_user` sobre `user_id` donde `status = 'pending'`: un usuario no puede tener dos solicitudes pendientes.
 
 ### Schemas de Pydantic
 
@@ -529,10 +656,10 @@ Son lo que entra y sale de la API; nunca se expone el modelo de base de datos di
 
 | Schema               | Uso                              | Campos                                                   |
 |----------------------|----------------------------------|----------------------------------------------------------|
-| `UserBase`           | Base de los demás                | `name: str`, `rol: Rol`                                  |
+| `UserBase`           | Base de los demás                | `name: str`, `rol: Rol \| None`                         |
 | `UserCreate`         | Body de `POST /users/`           | `name`, `rol`, `username: str`, `password: str`          |
 | `UserResponse`       | Respuesta con un usuario         | `id: UUID`, `name`, `rol`, `username`                    |
-| `UserUpdate`         | Body de `PUT`                    | `name: str`, `rol: Rol`                                  |
+| `UserUpdate`         | Body de `PUT`                    | `name: str`, `rol: Rol \| None` (los dos obligatorios)  |
 | `UserPatch`          | Body de `PATCH`                  | `name: str \| None`, `rol: Rol \| None`                  |
 | `PaginatedUsers`     | Respuesta de `GET /users/`       | `total: int`, `skip: int`, `limit: int`, `data: list[UserResponse]` |
 | `UserDelete`         | Body de `DELETE /users/`         | `users: list[UUID]`                                      |
@@ -542,10 +669,19 @@ Son lo que entra y sale de la API; nunca se expone el modelo de base de datos di
 
 | Schema            | Uso                                  | Campos                                           |
 |-------------------|--------------------------------------|--------------------------------------------------|
-| `RegisterRequest` | Body de `POST /auth/register`        | Los de `UserCreate`, pero `rol` no puede ser `admin` |
+| `RegisterRequest` | Body de `POST /auth/register`        | `name`, `username`, `password` (sin `rol`)       |
 | `LoginRequest`    | Body de `POST /auth/login`           | `username: str`, `password: str`                 |
 | `TokenResponse`   | Respuesta del login                  | `access_token: str`, `token_type: str`           |
 | `TokenPayload`    | Datos que van dentro del JWT         | `sub: str` (id del usuario), `exp: int`          |
+
+**`app/modules/role_requests/schemas.py`:**
+
+| Schema                  | Uso                                         | Campos                                                     |
+|-------------------------|---------------------------------------------|------------------------------------------------------------|
+| `RoleRequestCreate`     | Body de `POST /role-requests/`              | `requested_rol: Rol` (no puede ser `admin`)                |
+| `RoleRequestReview`     | Body de `/approve` y `/reject`              | `comment: str \| None` (máximo 500 caracteres)            |
+| `RoleRequestResponse`   | Respuesta con una solicitud                 | `id`, `folio`, `user_id`, `requested_rol`, `status`, `review_comment`, `reviewed_by`, `created_at`, `reviewed_at` |
+| `PaginatedRoleRequests` | Respuesta de `GET /role-requests/`          | `total`, `skip`, `limit`, `data: list[RoleRequestResponse]` |
 
 ---
 
@@ -559,7 +695,7 @@ En `postman/ghibli-users-api.postman_collection.json` hay una colección con tod
 4. Corre **Users → Crear usuario**. Su script guarda el `id` de la respuesta en la variable `userId`.
 5. Los demás requests usan `{{token}}` y `{{userId}}` automáticamente. La carpeta **Users** manda el token como Bearer en todos sus requests.
 
-**Auth → Registrar** crea un usuario `people` con un `username` distinto en cada corrida, así que puedes correrlo las veces que quieras.
+**Auth → Registrar** crea un usuario sin rol con un `username` distinto en cada corrida, así que puedes correrlo las veces que quieras.
 
 Las variables se editan en la pestaña **Variables**:
 
@@ -613,6 +749,12 @@ ghibli-users-api/
 │       │   ├── service.py       # Login y lectura del usuario del token
 │       │   ├── security.py      # Hash de contraseñas y firma/lectura de JWT
 │       │   └── schemas.py       # Schemas de Pydantic de auth
+│       ├── role_requests/
+│       │   ├── routers.py       # Endpoints HTTP de /role-requests
+│       │   ├── service.py       # Reglas: una pendiente por usuario, aprobar y negar
+│       │   ├── repository.py    # Acceso a datos y generación del folio
+│       │   ├── models.py        # Tabla role_requests y enum RoleRequestStatus
+│       │   └── schemas.py       # Schemas de Pydantic de las solicitudes
 │       └── users/
 │           ├── routers.py       # Endpoints HTTP de /users
 │           ├── service.py       # Lógica de negocio
@@ -722,6 +864,8 @@ El esquema de la base se versiona con [Alembic](https://alembic.sqlalchemy.org/)
 | `0002`    | Agrega `username` (único) y `password_hash`                     |
 | `0003`    | Cambia el `id` de entero a UUID                                 |
 | `0004`    | Convierte `rol` en el enum `user_rol` (borra usuarios con roles que no existen) |
+| `0005`    | Permite usuarios sin rol (`rol` acepta `NULL`)                                    |
+| `0006`    | Crea la tabla `role_requests` y el enum `role_request_status`                     |
 
 | Django                        | Alembic                                         |
 |-------------------------------|-------------------------------------------------|
@@ -765,7 +909,7 @@ uv run uvicorn app.main:app --reload
 
 # Crear un admin (en local / en Docker)
 uv run python -m app.create_admin --name "Totoro" --username totoro --password secreta123
-docker compose exec api python -m app.create_admin --name "Totoro" --username totoro --password secreta123
+docker compose run --rm api python -m app.create_admin --name "Totoro" --username totoro --password secreta123
 
 # Generar una clave para JWT_SECRET_KEY
 openssl rand -hex 32
@@ -796,11 +940,6 @@ docker compose down -v
 
 Cosas que todavía no funcionan como deberían:
 
-- **Usuario que no existe:** varios endpoints no responden `404`.
-  - `GET /users/{user_id}` y `PUT /users/{user_id}` responden `500`.
-  - `PATCH /users/{user_id}` responde `200` con `null`.
-  - `DELETE /users/{user_id}` responde `204` aunque no se haya borrado nada.
-- **`username` repetido:** registrar o crear un usuario con un `username` que ya existe responde `500` en lugar de `409`.
 - **Tokens:** no hay logout ni refresh token; un token sigue sirviendo hasta que expira. Como el usuario se vuelve a leer de la base en cada request, un cambio de rol aplica al momento, y si se borra al usuario su token deja de funcionar.
 - **Cambiar contraseña o username:** no hay endpoint para hacerlo.
 - **Orden de `GET /users/`:** se ordena por `id`, y como es un UUID el orden no significa nada (no es el orden de creación).

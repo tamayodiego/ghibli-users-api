@@ -22,6 +22,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido o expirado")
     return user
 
+# 403 si el usuario del token todavía no tiene rol
+def require_rol(user: UserResponse = Depends(get_current_user)) -> UserResponse:
+    if user.rol is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tu usuario todavía no tiene rol asignado")
+    return user
+
 # 403 si el usuario del token no es admin
 def require_admin(user: UserResponse = Depends(get_current_user)) -> UserResponse:
     if user.rol != Rol.admin:

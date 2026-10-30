@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.modules.users.models import User
@@ -40,7 +41,8 @@ class UserRepository:
             total=total, skip=skip, limit=limit, data=[self._to_schema(u) for u in users]
         )
 
-    def add(self, user: UserCreate, password_hash: str) -> UserResponse:
+    # None si el username ya existe (lo garantiza el unique de la BD)
+    def add(self, user: UserCreate, password_hash: str) -> UserResponse | None:
         db_user = User(
             name=user.name,
             rol=user.rol,
@@ -48,7 +50,11 @@ class UserRepository:
             password_hash=password_hash,
         )
         self.db.add(db_user)
-        self.db.commit()
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()  # sin esto, la sesión queda inservible
+            return None
         self.db.refresh(db_user)
         return self._to_schema(db_user)
 

@@ -1,24 +1,21 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.users.models import Rol
-from app.modules.users.schemas import UserCreate
+from app.modules.users.schemas import Name, Password, Username
 
 
-# Body de POST /auth/register: cualquier rol menos admin
-class RegisterRequest(UserCreate):
-
-    @field_validator("rol")
-    @classmethod
-    def rol_no_admin(cls, rol: Rol) -> Rol:
-        if rol == Rol.admin:
-            raise ValueError("No puedes registrarte como admin")
-        return rol
+# Body de POST /auth/register: sin rol, lo asigna un admin después
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: Name
+    username: Username
+    password: Password
 
 
 # Body de POST /auth/login
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(max_length=50)
+    password: str = Field(max_length=128)
 
 
 # Respuesta del login

@@ -21,7 +21,7 @@ class UserService:
         self.db = db
         self.repo = UserRepository(db)
 
-    def create_user(self, dto: UserCreate) -> UserResponse:
+    def create_user(self, dto: UserCreate) -> UserResponse | None:
         return self.repo.add(dto, hash_password(dto.password))
 
     def seek_user_by_id(self, id: UUID) -> UserResponse | None:
