@@ -15,7 +15,7 @@ FORBID_EXTRA = ConfigDict(extra="forbid")
 # Campos comunes de un usuario
 class UserBase(BaseModel):
     name: str
-    rol: Rol
+    rol: Rol | None = None
 
 # Al crear se manda la contraseña en texto plano; se guarda solo su hash
 class UserCreate(UserBase):

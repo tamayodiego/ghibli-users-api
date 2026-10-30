@@ -4,17 +4,17 @@ from app.modules.auth.dependencies import get_auth_service, get_current_user
 from app.modules.auth.schemas import LoginRequest, RegisterRequest, TokenResponse
 from app.modules.auth.service import AuthService
 from app.modules.users.routers import get_user_service
-from app.modules.users.schemas import UserResponse
+from app.modules.users.schemas import UserCreate, UserResponse
 from app.modules.users.service import UserService
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-# Registro: usa el mismo servicio que POST /users/, pero sin permitir admin
+# Registro: crea el usuario sin rol (rol = null); un admin se lo asigna después
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(user_dto: RegisterRequest, servicio_usuario: UserService = Depends(get_user_service)):
-    user = servicio_usuario.create_user(user_dto)
+    user = servicio_usuario.create_user(UserCreate(**user_dto.model_dump()))
     if user is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="El username ya existe")
     return user
