@@ -24,6 +24,14 @@
     {
       "key": "password",
       "value": "cambia-esta-contraseña"
+    },
+    {
+      "key": "requestId",
+      "value": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "key": "folio",
+      "value": "000000"
     }
   ],
   "item": [
@@ -277,6 +285,142 @@
           }
         ]
       }
+    },
+    {
+      "name": "Role requests",
+      "description": "Solicitudes de rol. Crear y ver las propias: cualquier usuario con token (incluso sin rol). Listar, ver, aprobar y negar: solo admin. \"Crear solicitud\" guarda su id en la variable requestId y su folio en folio.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Crear solicitud",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/role-requests/",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"requested_rol\": \"films\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"requestId\", body.id);",
+                  "pm.collectionVariables.set(\"folio\", body.folio);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mis solicitudes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/role-requests/me"
+          }
+        },
+        {
+          "name": "Mi última solicitud",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/role-requests/me/last"
+          }
+        },
+        {
+          "name": "Listar solicitudes (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/role-requests/?status=pending&skip=0&limit=10"
+          }
+        },
+        {
+          "name": "Obtener por id (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/role-requests/{{requestId}}"
+          }
+        },
+        {
+          "name": "Obtener por folio (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/role-requests/folio/{{folio}}"
+          }
+        },
+        {
+          "name": "Aprobar (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/role-requests/{{requestId}}/approve",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"comment\": \"Aprobado\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Negar (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/role-requests/{{requestId}}/reject",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"comment\": \"Motivo\"\n}"
+            }
+          }
+        }
+      ]
     }
   ]
 }

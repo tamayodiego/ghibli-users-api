@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 
 from app.database import Base  # también carga el .env
 from app.modules.users import models  # noqa: F401  (registra la tabla users en Base.metadata)
+from app.modules.role_requests import models as role_request_models  # noqa: F401  (registra role_requests)
 
 config = context.config
 if config.config_file_name is not None:
