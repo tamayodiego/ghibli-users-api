@@ -56,27 +56,30 @@ Docker Compose lee de ahí estos valores y no arranca si falta alguno.
 
 > ⚠️ PostgreSQL solo toma la contraseña la **primera vez** que crea el volumen de datos. Si después la cambias en el `.env`, la base sigue usando la anterior. Define la contraseña buena antes del primer `up`.
 
-**3. Levantar todo**
+**3. Levantar la base de datos y crear el primer admin**
+
+El admin se crea **antes** de exponer la API, para que nadie pueda registrarse con ese username mientras tanto.
 
 ```bash
-docker compose up -d --build
+docker compose build
+docker compose up -d db
+docker compose run --rm api sh -c "alembic upgrade head && python -m app.create_admin --name 'Totoro' --username totoro --password una-contraseña-segura"
+```
+
+`docker compose run` crea un contenedor temporal que aplica las migraciones, crea el admin y se borra al terminar. No publica el puerto `8000`, así que la API todavía no es accesible. Solo se hace una vez. Ver [por qué hace falta](#el-primer-admin).
+
+**4. Levantar la API**
+
+```bash
+docker compose up -d api
 ```
 
 Esto hace lo siguiente:
 
-1. Construye la imagen de la API con el `Dockerfile`.
-2. Levanta PostgreSQL 17 (`ghibli-users-db`) y espera a que su healthcheck diga que está listo.
-3. Levanta la API (`ghibli-users-api`), que primero aplica las migraciones pendientes (`alembic upgrade head`) y después arranca uvicorn en el puerto `8000`.
+1. Espera a que el healthcheck de PostgreSQL 17 (`ghibli-users-db`) diga que está listo.
+2. Levanta la API (`ghibli-users-api`), que aplica las migraciones pendientes (`alembic upgrade head`) y después arranca uvicorn en el puerto `8000`.
 
 Los dos contenedores tienen `restart: unless-stopped`: si se caen o se reinicia el servidor, vuelven a levantarse solos. Los datos se guardan en el volumen `pgdata`.
-
-**4. Crear el primer admin**
-
-```bash
-docker compose exec api python -m app.create_admin --name "Totoro" --username totoro --password una-contraseña-segura
-```
-
-Solo se hace una vez. Ver [por qué hace falta](#el-primer-admin).
 
 **5. Comprobar que funciona**
 
@@ -206,7 +209,7 @@ En `/auth/register` no se puede elegir el rol `admin`, y crear admins por `POST 
 uv run python -m app.create_admin --name "Totoro" --username totoro --password secreta123
 ```
 
-En Docker: `docker compose exec api python -m app.create_admin ...` con los mismos parámetros.
+En Docker se corre en un contenedor temporal, antes de levantar la API (ver [Opción A, paso 3](#opción-a-todo-con-docker-producción)), para que nadie se registre con ese username mientras tanto.
 
 > La contraseña queda en el historial de la terminal. Cámbiala después o borra esa línea del historial.
 
@@ -233,6 +236,7 @@ En Docker: `docker compose exec api python -m app.create_admin ...` con los mism
 - Los ids de usuario son **UUID**, por ejemplo `3ab6336d-b7ab-4f3e-bd21-c9ce7b481edb`.
 - Si el body o los parámetros no cumplen con el schema (falta un campo obligatorio, un tipo incorrecto, un rol que no existe, `limit` fuera de rango, etc.), cualquier endpoint responde **`422 Unprocessable Entity`** con el detalle del error.
 - Los endpoints con token responden `401` o `403` según la [tabla de permisos](#permisos).
+- Los endpoints con `{user_id}` responden `404` si el usuario no existe, y crear un usuario con un `username` que ya existe responde `409`.
 
 ---
 
@@ -283,7 +287,7 @@ La respuesta nunca incluye la contraseña ni su hash.
 
 **Errores:**
 - `422` si `rol` es `admin`: `"No puedes registrarte como admin"`.
-- Si el `username` ya existe, hoy responde `500`. Ver [Limitaciones conocidas](#limitaciones-conocidas).
+- `409` si el `username` ya existe: `"El username ya existe"`.
 
 ---
 
@@ -357,6 +361,8 @@ Crea un usuario nuevo con **cualquier** rol, incluido `admin`. Solo para admins.
 }
 ```
 
+**Errores:** `409` si el `username` ya existe: `"El username ya existe"`.
+
 ---
 
 ### `GET /users/`
@@ -404,7 +410,7 @@ Obtiene un usuario por su id.
 { "name": "Totoro", "rol": "admin", "id": "3ab6336d-b7ab-4f3e-bd21-c9ce7b481edb", "username": "totoro" }
 ```
 
-> ⚠️ Si el usuario no existe, hoy responde `500`. Ver [Limitaciones conocidas](#limitaciones-conocidas).
+**Errores:** `404` si el usuario no existe: `"Usuario no encontrado"`.
 
 ---
 
@@ -433,7 +439,7 @@ Reemplaza el nombre y el rol del usuario. Hay que mandar los dos campos. El `use
 { "name": "Chihiro", "rol": "locations", "id": "3925d6e7-05f8-46e0-888b-a8e17734a7a9", "username": "chihiro" }
 ```
 
-> ⚠️ Si el usuario no existe, hoy responde `500`. Ver [Limitaciones conocidas](#limitaciones-conocidas).
+**Errores:** `404` si el usuario no existe: `"Usuario no encontrado"`.
 
 ---
 
@@ -459,7 +465,7 @@ Actualiza **solo los campos que mandes** en el body. Los demás quedan como esta
 { "name": "Chihiro", "rol": "species", "id": "3925d6e7-05f8-46e0-888b-a8e17734a7a9", "username": "chihiro" }
 ```
 
-> ⚠️ Si el usuario no existe, hoy responde `200` con `null`. Ver [Limitaciones conocidas](#limitaciones-conocidas).
+**Errores:** `404` si el usuario no existe: `"Usuario no encontrado"`.
 
 ---
 
@@ -471,7 +477,7 @@ Borra un usuario por su id.
 
 **Respuesta `204 No Content`:** sin cuerpo.
 
-> ⚠️ Responde `204` aunque el usuario no exista. Ver [Limitaciones conocidas](#limitaciones-conocidas).
+**Errores:** `404` si el usuario no existe: `"Usuario no encontrado"`.
 
 ---
 
@@ -765,7 +771,7 @@ uv run uvicorn app.main:app --reload
 
 # Crear un admin (en local / en Docker)
 uv run python -m app.create_admin --name "Totoro" --username totoro --password secreta123
-docker compose exec api python -m app.create_admin --name "Totoro" --username totoro --password secreta123
+docker compose run --rm api python -m app.create_admin --name "Totoro" --username totoro --password secreta123
 
 # Generar una clave para JWT_SECRET_KEY
 openssl rand -hex 32
@@ -796,11 +802,6 @@ docker compose down -v
 
 Cosas que todavía no funcionan como deberían:
 
-- **Usuario que no existe:** varios endpoints no responden `404`.
-  - `GET /users/{user_id}` y `PUT /users/{user_id}` responden `500`.
-  - `PATCH /users/{user_id}` responde `200` con `null`.
-  - `DELETE /users/{user_id}` responde `204` aunque no se haya borrado nada.
-- **`username` repetido:** registrar o crear un usuario con un `username` que ya existe responde `500` en lugar de `409`.
 - **Tokens:** no hay logout ni refresh token; un token sigue sirviendo hasta que expira. Como el usuario se vuelve a leer de la base en cada request, un cambio de rol aplica al momento, y si se borra al usuario su token deja de funcionar.
 - **Cambiar contraseña o username:** no hay endpoint para hacerlo.
 - **Orden de `GET /users/`:** se ordena por `id`, y como es un UUID el orden no significa nada (no es el orden de creación).

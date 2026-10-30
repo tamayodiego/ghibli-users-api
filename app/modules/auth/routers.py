@@ -14,7 +14,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Registro: usa el mismo servicio que POST /users/, pero sin permitir admin
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(user_dto: RegisterRequest, servicio_usuario: UserService = Depends(get_user_service)):
-    return servicio_usuario.create_user(user_dto)
+    user = servicio_usuario.create_user(user_dto)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="El username ya existe")
+    return user
 
 # Inicio de sesión: devuelve un JWT
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
