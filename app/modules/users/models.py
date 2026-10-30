@@ -18,6 +18,6 @@ class User(Base):
     # PostgreSQL genera el UUID con gen_random_uuid()
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, server_default=text("gen_random_uuid()"))
     name: Mapped[str]
-    rol: Mapped[Rol] = mapped_column(Enum(Rol, name="user_rol"))
+    rol: Mapped[Rol | None] = mapped_column(Enum(Rol, name="user_rol"), nullable=True)  # None: sin acceso hasta que un admin le asigne rol
     username: Mapped[str] = mapped_column(unique=True)          # nombre para hacer login
     password_hash: Mapped[str]                  # nunca la contraseña en texto plano

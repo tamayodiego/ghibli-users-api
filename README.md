@@ -172,7 +172,7 @@ En Swagger, el botón **Authorize** recibe el token. Pega solo el `access_token`
 
 ### Cómo funciona
 
-1. Te registras con `POST /auth/register` o un admin te crea con `POST /users/`. La contraseña se guarda con hash (argon2), nunca en texto plano.
+1. Te registras con `POST /auth/register` (sin rol) o un admin te crea con `POST /users/`. La contraseña se guarda con hash (argon2), nunca en texto plano.
 2. Inicias sesión con `POST /auth/login`, que te devuelve un **JWT** (`access_token`).
 3. En los demás requests mandas el token en el header:
    ```
@@ -189,6 +189,8 @@ El `rol` de un usuario solo puede ser uno de estos:
 
 Cualquier otro valor responde `422`. La base de datos también lo valida, porque la columna es un enum de PostgreSQL.
 
+Un usuario también puede **no tener rol** (`rol: null`). Es lo que pasa al registrarse: el usuario puede iniciar sesión, pero no tiene acceso a nada hasta que un admin le asigna un rol con `PATCH /users/{id}`. El rol nunca lo elige el propio usuario, porque es lo que decide a qué datos puede entrar. Para quitarle el acceso a alguien, un admin le pone `rol: null`.
+
 ### Permisos
 
 | Acción                                      | Sin token | Cualquier rol | `admin` |
@@ -203,7 +205,7 @@ Cualquier otro valor responde `422`. La base de datos también lo valida, porque
 
 ### El primer admin
 
-En `/auth/register` no se puede elegir el rol `admin`, y crear admins por `POST /users/` necesita el token de otro admin. Por eso el primero se crea desde la terminal, sin pasar por la API:
+En `/auth/register` no se puede elegir rol, y crear admins por `POST /users/` necesita el token de otro admin. Por eso el primero se crea desde la terminal, sin pasar por la API:
 
 ```bash
 uv run python -m app.create_admin --name "Totoro" --username totoro --password secreta123
@@ -222,7 +224,7 @@ En Docker se corre en un contenedor temporal, antes de levantar la API (ver [Opc
 | Método   | Ruta               | Acceso         | Descripción                           | Respuesta exitosa          |
 |----------|--------------------|----------------|---------------------------------------|----------------------------|
 | `GET`    | `/health`          | Público        | Comprueba que la API está viva        | `200` `{"status": "ok"}`   |
-| `POST`   | `/auth/register`   | Público        | Registra un usuario (no admin)        | `201` `UserResponse`       |
+| `POST`   | `/auth/register`   | Público        | Registra un usuario sin rol           | `201` `UserResponse`       |
 | `POST`   | `/auth/login`      | Público        | Inicia sesión y devuelve un JWT       | `200` `TokenResponse`      |
 | `GET`    | `/auth/me`         | Con token      | Devuelve el usuario dueño del token   | `200` `UserResponse`       |
 | `POST`   | `/users/`          | Admin          | Crea un usuario con cualquier rol     | `201` `UserResponse`       |
@@ -253,21 +255,19 @@ Comprueba que la API está levantada. No consulta la base de datos.
 
 ### `POST /auth/register`
 
-Registra un usuario nuevo. Es público, pero no permite el rol `admin`.
+Registra un usuario nuevo **sin rol** (`rol: null`). Es público, pero el usuario no tiene acceso a nada hasta que un admin le asigna un rol.
 
 **Body (`RegisterRequest`):**
 
 | Campo      | Tipo     | Obligatorio | Descripción                                |
 |------------|----------|-------------|--------------------------------------------|
 | `name`     | `string` | Sí          | Nombre del usuario                         |
-| `rol`      | `Rol`    | Sí          | Cualquier [rol](#roles) menos `admin`      |
 | `username` | `string` | Sí          | Nombre para iniciar sesión; debe ser único |
 | `password` | `string` | Sí          | Contraseña; se guarda solo su hash         |
 
 ```json
 {
   "name": "Chihiro",
-  "rol": "people",
   "username": "chihiro",
   "password": "secreta123"
 }
@@ -277,7 +277,7 @@ Registra un usuario nuevo. Es público, pero no permite el rol `admin`.
 ```json
 {
   "name": "Chihiro",
-  "rol": "people",
+  "rol": null,
   "id": "3925d6e7-05f8-46e0-888b-a8e17734a7a9",
   "username": "chihiro"
 }
@@ -286,7 +286,7 @@ Registra un usuario nuevo. Es público, pero no permite el rol `admin`.
 La respuesta nunca incluye la contraseña ni su hash.
 
 **Errores:**
-- `422` si `rol` es `admin`: `"No puedes registrarte como admin"`.
+- `422` si se manda `rol` (o cualquier campo que no esté en el body).
 - `409` si el `username` ya existe: `"El username ya existe"`.
 
 ---
@@ -338,9 +338,9 @@ Devuelve el usuario dueño del token.
 
 ### `POST /users/`
 
-Crea un usuario nuevo con **cualquier** rol, incluido `admin`. Solo para admins. El `id` lo genera la base de datos.
+Crea un usuario nuevo con **cualquier** rol, incluido `admin`, o sin rol si no se manda. Solo para admins. El `id` lo genera la base de datos.
 
-**Body (`UserCreate`):** los mismos campos que [`/auth/register`](#post-authregister), pero `rol` puede ser `admin`.
+**Body (`UserCreate`):** los mismos campos que [`/auth/register`](#post-authregister), más `rol` (opcional, puede ser `admin`).
 
 ```json
 {
@@ -538,7 +538,7 @@ Son lo que entra y sale de la API; nunca se expone el modelo de base de datos di
 | `UserBase`           | Base de los demás                | `name: str`, `rol: Rol`                                  |
 | `UserCreate`         | Body de `POST /users/`           | `name`, `rol`, `username: str`, `password: str`          |
 | `UserResponse`       | Respuesta con un usuario         | `id: UUID`, `name`, `rol`, `username`                    |
-| `UserUpdate`         | Body de `PUT`                    | `name: str`, `rol: Rol`                                  |
+| `UserUpdate`         | Body de `PUT`                    | `name: str`, `rol: Rol \| None`                         |
 | `UserPatch`          | Body de `PATCH`                  | `name: str \| None`, `rol: Rol \| None`                  |
 | `PaginatedUsers`     | Respuesta de `GET /users/`       | `total: int`, `skip: int`, `limit: int`, `data: list[UserResponse]` |
 | `UserDelete`         | Body de `DELETE /users/`         | `users: list[UUID]`                                      |
@@ -548,7 +548,7 @@ Son lo que entra y sale de la API; nunca se expone el modelo de base de datos di
 
 | Schema            | Uso                                  | Campos                                           |
 |-------------------|--------------------------------------|--------------------------------------------------|
-| `RegisterRequest` | Body de `POST /auth/register`        | Los de `UserCreate`, pero `rol` no puede ser `admin` |
+| `RegisterRequest` | Body de `POST /auth/register`        | `name`, `username`, `password` (sin `rol`)       |
 | `LoginRequest`    | Body de `POST /auth/login`           | `username: str`, `password: str`                 |
 | `TokenResponse`   | Respuesta del login                  | `access_token: str`, `token_type: str`           |
 | `TokenPayload`    | Datos que van dentro del JWT         | `sub: str` (id del usuario), `exp: int`          |
@@ -565,7 +565,7 @@ En `postman/ghibli-users-api.postman_collection.json` hay una colección con tod
 4. Corre **Users → Crear usuario**. Su script guarda el `id` de la respuesta en la variable `userId`.
 5. Los demás requests usan `{{token}}` y `{{userId}}` automáticamente. La carpeta **Users** manda el token como Bearer en todos sus requests.
 
-**Auth → Registrar** crea un usuario `people` con un `username` distinto en cada corrida, así que puedes correrlo las veces que quieras.
+**Auth → Registrar** crea un usuario sin rol con un `username` distinto en cada corrida, así que puedes correrlo las veces que quieras.
 
 Las variables se editan en la pestaña **Variables**:
 
@@ -728,6 +728,7 @@ El esquema de la base se versiona con [Alembic](https://alembic.sqlalchemy.org/)
 | `0002`    | Agrega `username` (único) y `password_hash`                     |
 | `0003`    | Cambia el `id` de entero a UUID                                 |
 | `0004`    | Convierte `rol` en el enum `user_rol` (borra usuarios con roles que no existen) |
+| `0005`    | Permite usuarios sin rol (`rol` acepta `NULL`)                                    |
 
 | Django                        | Alembic                                         |
 |-------------------------------|-------------------------------------------------|
