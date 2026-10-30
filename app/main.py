@@ -9,7 +9,7 @@ from app.modules.users.routers import router as users
 
 # Las tablas se crean con migraciones (uv run alembic upgrade head), no al arrancar
 
-app = FastAPI(title="ghibli-users-api", version="0.3.0")
+app = FastAPI(title="ghibli-users-api", version="0.4.0")
 app.include_router(auth)
 app.include_router(users)
 app.include_router(role_requests)
