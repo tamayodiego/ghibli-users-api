@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.modules.auth.dependencies import get_current_user, require_admin
+from app.modules.auth.dependencies import require_admin, require_rol
 from app.modules.users.service import UserService
 from app.modules.users.schemas import (
     PaginatedUsers,
@@ -20,8 +20,8 @@ from app.modules.users.schemas import (
 USER_NOT_FOUND = "Usuario no encontrado"
 USERNAME_TAKEN = "El username ya existe"
 
-# Todos piden token; crear, editar y borrar además piden rol admin
-router = APIRouter(prefix="/users", tags=["users"], dependencies=[Depends(get_current_user)])
+# Todos piden token de un usuario con rol; crear, editar y borrar además piden rol admin
+router = APIRouter(prefix="/users", tags=["users"], dependencies=[Depends(require_rol)])
 
 def get_user_service(db: Session = Depends(get_db)) -> UserService:
     return UserService(db)

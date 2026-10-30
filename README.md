@@ -193,15 +193,17 @@ Un usuario también puede **no tener rol** (`rol: null`). Es lo que pasa al regi
 
 ### Permisos
 
-| Acción                                      | Sin token | Cualquier rol | `admin` |
-|---------------------------------------------|-----------|---------------|---------|
-| `/health`, `/auth/register`, `/auth/login`  | ✅        | ✅            | ✅      |
-| `/auth/me`                                  | `401`     | ✅            | ✅      |
-| Listar y ver usuarios                       | `401`     | ✅            | ✅      |
-| Crear, editar y borrar usuarios             | `401`     | `403`         | ✅      |
+| Acción                                      | Sin token | Sin rol | Cualquier otro rol | `admin` |
+|---------------------------------------------|-----------|---------|--------------------|---------|
+| `/health`, `/auth/register`, `/auth/login`  | ✅        | ✅      | ✅                 | ✅      |
+| `/auth/me`                                  | `401`     | ✅      | ✅                 | ✅      |
+| Listar y ver usuarios                       | `401`     | `403`   | ✅                 | ✅      |
+| Crear, editar y borrar usuarios             | `401`     | `403`   | `403`              | ✅      |
 
 - **`401 Unauthorized`:** no mandaste token, o es inválido o ya expiró.
-- **`403 Forbidden`:** el token es válido, pero tu rol no tiene permiso.
+- **`403 Forbidden`:** el token es válido, pero tu usuario todavía no tiene rol (`"Tu usuario todavía no tiene rol asignado"`) o tu rol no tiene permiso.
+
+`/auth/me` sí acepta usuarios sin rol, para que puedan ver si ya les asignaron uno.
 
 ### El primer admin
 
@@ -416,7 +418,7 @@ Obtiene un usuario por su id.
 
 ### `PUT /users/{user_id}`
 
-Reemplaza el nombre y el rol del usuario. Hay que mandar los dos campos. El `username` y la contraseña no se cambian aquí.
+Reemplaza el nombre y el rol del usuario. Hay que mandar los dos campos; `"rol": null` le quita el rol. El `username` y la contraseña no se cambian aquí.
 
 **Path params:** `user_id` (`UUID`)
 
@@ -424,8 +426,8 @@ Reemplaza el nombre y el rol del usuario. Hay que mandar los dos campos. El `use
 
 | Campo  | Tipo     | Obligatorio |
 |--------|----------|-------------|
-| `name` | `string` | Sí          |
-| `rol`  | `Rol`    | Sí          |
+| `name` | `string`       | Sí          |
+| `rol`  | `Rol` o `null` | Sí          |
 
 ```json
 {
@@ -535,10 +537,10 @@ Son lo que entra y sale de la API; nunca se expone el modelo de base de datos di
 
 | Schema               | Uso                              | Campos                                                   |
 |----------------------|----------------------------------|----------------------------------------------------------|
-| `UserBase`           | Base de los demás                | `name: str`, `rol: Rol`                                  |
+| `UserBase`           | Base de los demás                | `name: str`, `rol: Rol \| None`                         |
 | `UserCreate`         | Body de `POST /users/`           | `name`, `rol`, `username: str`, `password: str`          |
 | `UserResponse`       | Respuesta con un usuario         | `id: UUID`, `name`, `rol`, `username`                    |
-| `UserUpdate`         | Body de `PUT`                    | `name: str`, `rol: Rol \| None`                         |
+| `UserUpdate`         | Body de `PUT`                    | `name: str`, `rol: Rol \| None` (los dos obligatorios)  |
 | `UserPatch`          | Body de `PATCH`                  | `name: str \| None`, `rol: Rol \| None`                  |
 | `PaginatedUsers`     | Respuesta de `GET /users/`       | `total: int`, `skip: int`, `limit: int`, `data: list[UserResponse]` |
 | `UserDelete`         | Body de `DELETE /users/`         | `users: list[UUID]`                                      |

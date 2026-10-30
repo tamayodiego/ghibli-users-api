@@ -32,6 +32,7 @@ class UserResponse(UserBase):
 class UserUpdate(UserBase):
     model_config = FORBID_EXTRA
     name: Name
+    rol: Rol | None             # obligatorio en PUT; null quita el rol
 
 class UserPatch(BaseModel):
     model_config = FORBID_EXTRA
