@@ -189,7 +189,7 @@ El `rol` de un usuario solo puede ser uno de estos:
 
 Cualquier otro valor responde `422`. La base de datos también lo valida, porque la columna es un enum de PostgreSQL.
 
-Un usuario también puede **no tener rol** (`rol: null`). Es lo que pasa al registrarse: el usuario puede iniciar sesión, pero no tiene acceso a nada hasta que un admin le asigna un rol con `PATCH /users/{id}`. El rol nunca lo elige el propio usuario, porque es lo que decide a qué datos puede entrar. Para quitarle el acceso a alguien, un admin le pone `rol: null`.
+Un usuario también puede **no tener rol** (`rol: null`). Es lo que pasa al registrarse: el usuario puede iniciar sesión, pero no tiene acceso a nada hasta que un admin le asigna un rol, ya sea aprobando una [solicitud de rol](#solicitudes-de-rol) o con `PATCH /users/{id}`. El usuario puede solicitar cualquier rol menos `admin`, pero nunca se lo asigna él mismo: solo un admin puede asignarlo, porque el rol decide a qué datos puede entrar. Para quitarle el acceso a alguien, un admin le pone `rol: null`.
 
 ### Permisos
 
@@ -199,11 +199,28 @@ Un usuario también puede **no tener rol** (`rol: null`). Es lo que pasa al regi
 | `/auth/me`                                  | `401`     | ✅      | ✅                 | ✅      |
 | Listar y ver usuarios                       | `401`     | `403`   | ✅                 | ✅      |
 | Crear, editar y borrar usuarios             | `401`     | `403`   | `403`              | ✅      |
+| Crear y ver sus propias solicitudes de rol  | `401`     | ✅      | ✅                 | ✅      |
+| Ver, aprobar y negar todas las solicitudes  | `401`     | `403`   | `403`              | ✅      |
 
 - **`401 Unauthorized`:** no mandaste token, o es inválido o ya expiró.
 - **`403 Forbidden`:** el token es válido, pero tu usuario todavía no tiene rol (`"Tu usuario todavía no tiene rol asignado"`) o tu rol no tiene permiso.
 
 `/auth/me` sí acepta usuarios sin rol, para que puedan ver si ya les asignaron uno.
+
+### Solicitudes de rol
+
+Un usuario pide un rol con `POST /role-requests/`, y un admin la aprueba o la niega. Sirve tanto para usuarios sin rol como para cambiar de rol.
+
+1. El usuario crea la solicitud con el rol que quiere (nunca `admin`). Queda en estado `pending` y recibe un **folio**.
+2. El admin la revisa por id o por folio, y la aprueba (`approve`) o la niega (`reject`), con un comentario opcional.
+3. Al aprobarla, el usuario recibe el rol **en la misma transacción**: o pasan las dos cosas, o ninguna.
+
+Reglas:
+
+- Un usuario solo puede tener **una solicitud `pending`** a la vez (`409`). Lo garantiza un índice único parcial en la base de datos.
+- No se puede pedir el rol que ya tienes (`409`).
+- Una solicitud ya aprobada o negada no se puede volver a revisar (`409`).
+- El **folio** son 6 dígitos aleatorios (por ejemplo `048213`), único, pensado para que una persona lo pueda dictar o buscar. El `id` (UUID) sigue siendo el identificador técnico.
 
 ### El primer admin
 
@@ -236,6 +253,14 @@ En Docker se corre en un contenedor temporal, antes de levantar la API (ver [Opc
 | `PATCH`  | `/users/{user_id}` | Admin          | Actualiza solo los campos enviados    | `200` `UserResponse`       |
 | `DELETE` | `/users/{user_id}` | Admin          | Borra un usuario                      | `204` sin cuerpo           |
 | `DELETE` | `/users/`          | Admin          | Borra varios usuarios                 | `200` `UserDeleteResponse` |
+| `POST`   | `/role-requests/`  | Con token      | Solicita un rol                       | `201` `RoleRequestResponse` |
+| `GET`    | `/role-requests/me` | Con token     | Mis solicitudes, de la más nueva a la más vieja | `200` `list[RoleRequestResponse]` |
+| `GET`    | `/role-requests/me/last` | Con token | Mi última solicitud                  | `200` `RoleRequestResponse` |
+| `GET`    | `/role-requests/`  | Admin          | Lista solicitudes (filtro `?status=`) | `200` `PaginatedRoleRequests` |
+| `GET`    | `/role-requests/{request_id}` | Admin | Obtiene una solicitud por id         | `200` `RoleRequestResponse` |
+| `GET`    | `/role-requests/folio/{folio}` | Admin | Obtiene una solicitud por folio     | `200` `RoleRequestResponse` |
+| `POST`   | `/role-requests/{request_id}/approve` | Admin | Aprueba y asigna el rol      | `200` `RoleRequestResponse` |
+| `POST`   | `/role-requests/{request_id}/reject` | Admin | Niega la solicitud            | `200` `RoleRequestResponse` |
 
 - Los ids de usuario son **UUID**, por ejemplo `3ab6336d-b7ab-4f3e-bd21-c9ce7b481edb`.
 - Si el body o los parámetros no cumplen con el schema (falta un campo obligatorio, un tipo incorrecto, un rol que no existe, `limit` fuera de rango, etc.), cualquier endpoint responde **`422 Unprocessable Entity`** con el detalle del error.
@@ -517,6 +542,84 @@ Borra varios usuarios a la vez y dice cuáles se borraron y cuáles no existían
 
 ---
 
+### `POST /role-requests/`
+
+Crea una solicitud de rol para el usuario del token. Acepta usuarios sin rol.
+
+**Body (`RoleRequestCreate`):**
+```json
+{ "requested_rol": "films" }
+```
+
+**Respuesta `201` (`RoleRequestResponse`):**
+```json
+{
+  "id": "8d2f6c1a-4b3e-4f2a-9c1d-2e3f4a5b6c7d",
+  "folio": "048213",
+  "user_id": "3925d6e7-05f8-46e0-888b-a8e17734a7a9",
+  "requested_rol": "films",
+  "status": "pending",
+  "review_comment": null,
+  "reviewed_by": null,
+  "created_at": "2026-10-30T18:00:00Z",
+  "reviewed_at": null
+}
+```
+
+**Errores:**
+- `409` si ya tienes una solicitud pendiente: `"Ya tienes una solicitud pendiente"`.
+- `409` si pides el rol que ya tienes: `"Ya tienes ese rol"`.
+- `422` si pides `admin`: `"No se puede solicitar el rol admin"`.
+
+---
+
+### `GET /role-requests/me` y `GET /role-requests/me/last`
+
+- `/me` devuelve todas tus solicitudes, de la más nueva a la más vieja (`200`, lista vacía si no tienes).
+- `/me/last` devuelve solo la más reciente. `404` si no tienes ninguna: `"No tienes solicitudes"`.
+
+---
+
+### `GET /role-requests/`
+
+Solo admin. Lista las solicitudes con paginación, de la más nueva a la más vieja.
+
+| Parámetro | Tipo     | Default | Descripción                                    |
+|-----------|----------|---------|------------------------------------------------|
+| `status`  | `string` | todos   | `pending`, `approved` o `rejected`             |
+| `skip`    | `int`    | `0`     | Cuántas saltar                                 |
+| `limit`   | `int`    | `10`    | Cuántas devolver (máximo 100)                  |
+
+**Respuesta `200` (`PaginatedRoleRequests`):** `{"total", "skip", "limit", "data": [RoleRequestResponse]}`.
+
+---
+
+### `GET /role-requests/{request_id}` y `GET /role-requests/folio/{folio}`
+
+Solo admin. Obtienen una solicitud por su UUID o por su folio de 6 dígitos.
+
+- `404` si no existe: `"Solicitud no encontrada"`.
+- `422` si el id no es un UUID o el folio no son exactamente 6 dígitos.
+
+---
+
+### `POST /role-requests/{request_id}/approve` y `/reject`
+
+Solo admin. Aprueban o niegan una solicitud pendiente. Al aprobar, el usuario recibe el rol solicitado en la misma transacción.
+
+**Body (`RoleRequestReview`, opcional):**
+```json
+{ "comment": "Aprobado por el equipo de películas" }
+```
+
+**Respuesta `200` (`RoleRequestResponse`):** la solicitud con `status` en `approved` o `rejected`, y con `reviewed_by`, `reviewed_at` y `review_comment` llenos.
+
+**Errores:**
+- `404` si la solicitud no existe.
+- `409` si ya fue aprobada o negada: `"La solicitud ya fue revisada"`.
+
+---
+
 ## Modelos de datos
 
 ### Tabla `users` (modelo SQLAlchemy `User`)
@@ -525,9 +628,25 @@ Borra varios usuarios a la vez y dice cuáles se borraron y cuáles no existían
 |-----------------|---------------------|-----------------------------------------------------|
 | `id`            | `uuid`              | Llave primaria; lo genera PostgreSQL con `gen_random_uuid()` |
 | `name`          | `character varying` | `NOT NULL`                                          |
-| `rol`           | `user_rol` (enum)   | `NOT NULL`; uno de los [roles](#roles)              |
+| `rol`           | `user_rol` (enum)   | Uno de los [roles](#roles), o `NULL` si no tiene rol |
 | `username`      | `character varying` | `NOT NULL`, único                                   |
 | `password_hash` | `character varying` | `NOT NULL`; hash argon2 de la contraseña            |
+
+### Tabla `role_requests` (modelo SQLAlchemy `RoleRequest`)
+
+| Columna          | Tipo                          | Restricciones                                                  |
+|------------------|-------------------------------|----------------------------------------------------------------|
+| `id`             | `uuid`                        | Llave primaria; `gen_random_uuid()`                            |
+| `folio`          | `char(6)`                     | `NOT NULL`, único; solo dígitos                                |
+| `user_id`        | `uuid`                        | `NOT NULL`; FK → `users.id`, `ON DELETE CASCADE`               |
+| `requested_rol`  | `user_rol` (enum)             | `NOT NULL`; nunca `admin`                                      |
+| `status`         | `role_request_status` (enum)  | `NOT NULL`, default `pending`; `pending`, `approved`, `rejected` |
+| `reviewed_by`    | `uuid`                        | FK → `users.id`, `ON DELETE SET NULL`; el admin que la revisó  |
+| `review_comment` | `text`                        | Opcional                                                       |
+| `created_at`     | `timestamptz`                 | `NOT NULL`, default `now()`                                    |
+| `reviewed_at`    | `timestamptz`                 | Se llena al aprobar o negar                                    |
+
+Índice único parcial `uq_role_requests_one_pending_per_user` sobre `user_id` donde `status = 'pending'`: un usuario no puede tener dos solicitudes pendientes.
 
 ### Schemas de Pydantic
 
@@ -554,6 +673,15 @@ Son lo que entra y sale de la API; nunca se expone el modelo de base de datos di
 | `LoginRequest`    | Body de `POST /auth/login`           | `username: str`, `password: str`                 |
 | `TokenResponse`   | Respuesta del login                  | `access_token: str`, `token_type: str`           |
 | `TokenPayload`    | Datos que van dentro del JWT         | `sub: str` (id del usuario), `exp: int`          |
+
+**`app/modules/role_requests/schemas.py`:**
+
+| Schema                  | Uso                                         | Campos                                                     |
+|-------------------------|---------------------------------------------|------------------------------------------------------------|
+| `RoleRequestCreate`     | Body de `POST /role-requests/`              | `requested_rol: Rol` (no puede ser `admin`)                |
+| `RoleRequestReview`     | Body de `/approve` y `/reject`              | `comment: str \| None` (máximo 500 caracteres)            |
+| `RoleRequestResponse`   | Respuesta con una solicitud                 | `id`, `folio`, `user_id`, `requested_rol`, `status`, `review_comment`, `reviewed_by`, `created_at`, `reviewed_at` |
+| `PaginatedRoleRequests` | Respuesta de `GET /role-requests/`          | `total`, `skip`, `limit`, `data: list[RoleRequestResponse]` |
 
 ---
 
@@ -621,6 +749,12 @@ ghibli-users-api/
 │       │   ├── service.py       # Login y lectura del usuario del token
 │       │   ├── security.py      # Hash de contraseñas y firma/lectura de JWT
 │       │   └── schemas.py       # Schemas de Pydantic de auth
+│       ├── role_requests/
+│       │   ├── routers.py       # Endpoints HTTP de /role-requests
+│       │   ├── service.py       # Reglas: una pendiente por usuario, aprobar y negar
+│       │   ├── repository.py    # Acceso a datos y generación del folio
+│       │   ├── models.py        # Tabla role_requests y enum RoleRequestStatus
+│       │   └── schemas.py       # Schemas de Pydantic de las solicitudes
 │       └── users/
 │           ├── routers.py       # Endpoints HTTP de /users
 │           ├── service.py       # Lógica de negocio
@@ -731,6 +865,7 @@ El esquema de la base se versiona con [Alembic](https://alembic.sqlalchemy.org/)
 | `0003`    | Cambia el `id` de entero a UUID                                 |
 | `0004`    | Convierte `rol` en el enum `user_rol` (borra usuarios con roles que no existen) |
 | `0005`    | Permite usuarios sin rol (`rol` acepta `NULL`)                                    |
+| `0006`    | Crea la tabla `role_requests` y el enum `role_request_status`                     |
 
 | Django                        | Alembic                                         |
 |-------------------------------|-------------------------------------------------|
