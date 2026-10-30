@@ -421,6 +421,102 @@
           }
         }
       ]
+    },
+    {
+      "name": "Ghibli",
+      "description": "Gateway a Studio Ghibli. Cada recurso pide el rol del mismo nombre (o admin). Haz login con un usuario de ese rol para probarlo; con otro rol responde 403.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Listar films",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ghibli/films?limit=10"
+          }
+        },
+        {
+          "name": "Obtener films por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ghibli/films/2baf70d1-42bb-4437-b551-e5fed5a87abe"
+          }
+        },
+        {
+          "name": "Listar people",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ghibli/people?limit=10"
+          }
+        },
+        {
+          "name": "Obtener people por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ghibli/people/fe93adf2-2f3a-4ec4-9f68-5422f1b87c01"
+          }
+        },
+        {
+          "name": "Listar locations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ghibli/locations?limit=10"
+          }
+        },
+        {
+          "name": "Obtener locations por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ghibli/locations/11014596-71b0-4b3e-b8c0-1c4b15f28b9a"
+          }
+        },
+        {
+          "name": "Listar species",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ghibli/species?limit=10"
+          }
+        },
+        {
+          "name": "Obtener species por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ghibli/species/af3910a6-429f-4c74-9ad5-dfe1c4aa04f2"
+          }
+        },
+        {
+          "name": "Listar vehicles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ghibli/vehicles?limit=10"
+          }
+        },
+        {
+          "name": "Obtener vehicles por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ghibli/vehicles/4e09b023-f650-4747-9ab9-eacf14540cfb"
+          }
+        }
+      ]
     }
   ]
 }

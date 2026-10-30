@@ -2,7 +2,7 @@
 
 API REST para la gestión de usuarios, pensada para controlar con roles el acceso a la API de Studio Ghibli. Está construida con **FastAPI**, **PostgreSQL**, **SQLAlchemy** y **Alembic**, y se despliega con **Docker Compose**.
 
-> **Estado actual:** el CRUD de usuarios está completo y guarda los datos en PostgreSQL. Tiene registro, login con JWT y permisos por rol: solo un `admin` puede crear, editar o borrar usuarios. La integración con la API de Studio Ghibli y Redis están planeados, pero todavía no existen.
+> **Estado actual:** el CRUD de usuarios está completo y guarda los datos en PostgreSQL. Tiene registro, login con JWT y permisos por rol: solo un `admin` puede crear, editar o borrar usuarios. Cada usuario consume la API de Studio Ghibli según su rol, a través de `/ghibli`.
 
 ---
 
@@ -11,6 +11,7 @@ API REST para la gestión de usuarios, pensada para controlar con roles el acces
 - [Cómo ejecutar la aplicación](#cómo-ejecutar-la-aplicación)
 - [Autenticación y roles](#autenticación-y-roles)
 - [Endpoints](#endpoints)
+- [Gateway a Studio Ghibli](#gateway-a-studio-ghibli)
 - [Modelos de datos](#modelos-de-datos)
 - [Probar con Postman](#probar-con-postman)
 - [Ver la base de datos](#ver-la-base-de-datos)
@@ -201,6 +202,8 @@ Un usuario también puede **no tener rol** (`rol: null`). Es lo que pasa al regi
 | Crear, editar y borrar usuarios             | `401`     | `403`   | `403`              | ✅      |
 | Crear y ver sus propias solicitudes de rol  | `401`     | ✅      | ✅                 | ✅      |
 | Ver, aprobar y negar todas las solicitudes  | `401`     | `403`   | `403`              | ✅      |
+| `/ghibli/{recurso}` de **su** rol           | `401`     | `403`   | ✅                 | ✅      |
+| `/ghibli/{recurso}` de **otro** rol         | `401`     | `403`   | `403`              | ✅      |
 
 - **`401 Unauthorized`:** no mandaste token, o es inválido o ya expiró.
 - **`403 Forbidden`:** el token es válido, pero tu usuario todavía no tiene rol (`"Tu usuario todavía no tiene rol asignado"`) o tu rol no tiene permiso.
@@ -261,6 +264,8 @@ En Docker se corre en un contenedor temporal, antes de levantar la API (ver [Opc
 | `GET`    | `/role-requests/folio/{folio}` | Admin | Obtiene una solicitud por folio     | `200` `RoleRequestResponse` |
 | `POST`   | `/role-requests/{request_id}/approve` | Admin | Aprueba y asigna el rol      | `200` `RoleRequestResponse` |
 | `POST`   | `/role-requests/{request_id}/reject` | Admin | Niega la solicitud            | `200` `RoleRequestResponse` |
+| `GET`    | `/ghibli/{recurso}` | Su rol o admin | Listado resumido de un recurso de Ghibli | `200` lista de resúmenes |
+| `GET`    | `/ghibli/{recurso}/{id}` | Su rol o admin | Un recurso de Ghibli completo   | `200` detalle            |
 
 - Los ids de usuario son **UUID**, por ejemplo `3ab6336d-b7ab-4f3e-bd21-c9ce7b481edb`.
 - Si el body o los parámetros no cumplen con el schema (falta un campo obligatorio, un tipo incorrecto, un rol que no existe, `limit` fuera de rango, etc.), cualquier endpoint responde **`422 Unprocessable Entity`** con el detalle del error.
@@ -620,6 +625,76 @@ Solo admin. Aprueban o niegan una solicitud pendiente. Al aprobar, el usuario re
 
 ---
 
+## Gateway a Studio Ghibli
+
+La API consulta la [API de Studio Ghibli](https://ghibliapi.vercel.app) y regresa sus datos según el rol del usuario. Los roles se llaman igual que los recursos de Ghibli.
+
+### Endpoints
+
+Por cada recurso hay dos endpoints: un **listado resumido** y el **detalle completo**.
+
+| Recurso     | Listado resumido              | Detalle completo                    | Rol que accede        |
+|-------------|-------------------------------|-------------------------------------|-----------------------|
+| Películas   | `GET /ghibli/films`           | `GET /ghibli/films/{film_id}`       | `films` o `admin`     |
+| Personajes  | `GET /ghibli/people`          | `GET /ghibli/people/{person_id}`    | `people` o `admin`    |
+| Lugares     | `GET /ghibli/locations`       | `GET /ghibli/locations/{location_id}` | `locations` o `admin` |
+| Especies    | `GET /ghibli/species`         | `GET /ghibli/species/{species_id}`  | `species` o `admin`   |
+| Vehículos   | `GET /ghibli/vehicles`        | `GET /ghibli/vehicles/{vehicle_id}` | `vehicles` o `admin`  |
+
+- El listado acepta `?limit=N` (de 1 a 250). Sin `limit`, regresa todos.
+- El listado regresa resúmenes: `{id, title}` en películas y `{id, name}` en lo demás.
+
+**Ejemplo:** `GET /ghibli/films/2baf70d1-42bb-4437-b551-e5fed5a87abe` (usuario con rol `films`):
+
+```json
+{
+  "id": "2baf70d1-42bb-4437-b551-e5fed5a87abe",
+  "title": "Castle in the Sky",
+  "original_title": "天空の城ラピュタ",
+  "original_title_romanised": "Tenkū no shiro Rapyuta",
+  "image": "https://image.tmdb.org/t/p/w600_and_h900_bestv2/npOnzAbLh6VOIu3naU5QaEcTepo.jpg",
+  "movie_banner": "https://image.tmdb.org/t/p/w533_and_h300_bestv2/3cyjYtLWCBE1uvWINHFsFnE8LUK.jpg",
+  "description": "The orphan Sheeta inherited a mysterious crystal...",
+  "director": "Hayao Miyazaki",
+  "producer": "Isao Takahata",
+  "release_date": "1986",
+  "running_time": "124",
+  "rt_score": "95",
+  "people": [
+    { "id": "fe93adf2-2f3a-4ec4-9f68-5422f1b87c01", "name": "Pazu" }
+  ],
+  "species": [{ "id": "af3910a6-429f-4c74-9ad5-dfe1c4aa04f2", "name": "Human" }],
+  "locations": [],
+  "vehicles": [{ "id": "4e09b023-f650-4747-9ab9-eacf14540cfb", "name": "Air Destroyer Goliath" }]
+}
+```
+
+(`people` recortado; trae todos los personajes de la película).
+
+### Decisiones de diseño
+
+- **Links como resúmenes.** Ghibli enlaza un recurso con otros mediante URLs (por ejemplo, una película trae los links de sus personajes). La API nunca regresa esas URLs: las convierte en resúmenes `{id, name}`, para que un usuario vea qué está relacionado sin acceder a recursos de otro rol. El `id` no da acceso: pedir el detalle de un recurso de otro rol responde `403`.
+- **Links genéricos.** Algunos links de Ghibli no tienen id (por ejemplo `.../locations/`, cuando no tiene el dato). Se ignoran.
+- **Sin el campo `url`.** El link de Ghibli a sí mismo se quita; basta el `id`.
+- **Datos tal cual.** Los números vienen como texto (`"124"`, `"1,000"`) y la edad a veces es una palabra (`"Adult"`). Como la API solo los muestra, se dejan como texto.
+- **Pedir solo lo necesario.** Para los resúmenes se usa el parámetro `fields` de Ghibli (por ejemplo, `/people?fields=id,name`), así no se descargan los recursos completos.
+- **Caché en memoria, perezosa.** Nada se descarga al arrancar. La primera vez que un request necesita algo, se pide a Ghibli y se guarda en memoria durante `GHIBLI_CACHE_SECONDS` (1 día por defecto). Los datos de Ghibli casi nunca cambian, así que la mayoría de los requests se responden sin consultar a Ghibli. Los `404` no se guardan.
+- **Ids validados.** Los ids de `/ghibli/.../{id}` deben tener formato UUID (36 caracteres hexadecimales y guiones). Así nunca se manda a Ghibli texto arbitrario en la URL.
+
+### Errores
+
+| Situación                                  | Respuesta |
+|--------------------------------------------|-----------|
+| El id no existe en Ghibli                  | `404` `"Recurso no encontrado en Studio Ghibli"` |
+| El id no tiene formato UUID                | `422`     |
+| Tu rol no es el del recurso (ni admin)     | `403` `"Tu rol no tiene acceso a este recurso"` |
+| Ghibli no responde en `GHIBLI_TIMEOUT_SECONDS` | `504` `"Studio Ghibli no respondió a tiempo"` |
+| Ghibli responde con error o no se puede conectar | `502` `"Error al consultar Studio Ghibli"` |
+
+Los errores `502` y `504` se manejan en un solo lugar, en `app/main.py`, para no repetir el manejo en cada endpoint.
+
+---
+
 ## Modelos de datos
 
 ### Tabla `users` (modelo SQLAlchemy `User`)
@@ -749,6 +824,12 @@ ghibli-users-api/
 │       │   ├── service.py       # Login y lectura del usuario del token
 │       │   ├── security.py      # Hash de contraseñas y firma/lectura de JWT
 │       │   └── schemas.py       # Schemas de Pydantic de auth
+│       ├── ghibli/
+│       │   ├── routers.py       # Endpoints HTTP de /ghibli y permiso por rol
+│       │   ├── service.py       # Arma los resúmenes y usa la caché
+│       │   ├── client.py        # Cliente HTTP (httpx) hacia Studio Ghibli
+│       │   ├── cache.py         # Caché en memoria con expiración
+│       │   └── schemas.py       # Versiones resumidas y completas de cada recurso
 │       ├── role_requests/
 │       │   ├── routers.py       # Endpoints HTTP de /role-requests
 │       │   ├── service.py       # Reglas: una pendiente por usuario, aprobar y negar
@@ -847,6 +928,9 @@ Se definen en el archivo `.env`; `.env.example` es la plantilla.
 | `JWT_SECRET_KEY`     | Sí          | La API                           | Clave para firmar los tokens. Si cambia, todos los tokens existentes dejan de servir | salida de `openssl rand -hex 32` |
 | `JWT_EXPIRE_MINUTES` | No          | La API                           | Minutos que dura un token. Por defecto `30`          | `30`                                                  |
 | `SQL_ECHO`           | No          | La API                           | Si es `true`, imprime en consola cada consulta SQL. Por defecto `false` | `true`                             |
+| `GHIBLI_BASE_URL`    | No          | La API                           | URL de la API de Studio Ghibli. Por defecto `https://ghibliapi.vercel.app` | `https://ghibliapi.vercel.app` |
+| `GHIBLI_CACHE_SECONDS` | No        | La API                           | Segundos que dura la caché. Por defecto `86400` (1 día) | `86400`                                     |
+| `GHIBLI_TIMEOUT_SECONDS` | No      | La API                           | Segundos máximos de espera por petición a Ghibli. Por defecto `5` | `5`                               |
 
 - **Dentro de Docker** no hace falta `DATABASE_URL`: Docker Compose la arma con `POSTGRES_*` y el host `db`, y fuerza `SQL_ECHO=false`.
 - **Fuera de Docker**, la app lee el `.env` con `python-dotenv`. Si falta `DATABASE_URL` o `JWT_SECRET_KEY`, no arranca.
@@ -944,6 +1028,7 @@ Cosas que todavía no funcionan como deberían:
 - **Cambiar contraseña o username:** no hay endpoint para hacerlo.
 - **Orden de `GET /users/`:** se ordena por `id`, y como es un UUID el orden no significa nada (no es el orden de creación).
 - **Tests:** la carpeta `tests/` todavía no tiene pruebas.
+- **Caché por proceso:** la caché de Ghibli vive en la memoria de cada proceso. Con varias instancias de la API, cada una tiene la suya. Para compartirla haría falta algo como Redis.
 
 ---
 
